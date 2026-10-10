@@ -17,13 +17,12 @@ before(async () => {
   assert.equal(body.data.database, process.env.DB_NAME || 'assignment_tracking');
 });
 
-test('serves public course and published assignment lists without private fields', async () => {
+test('serves public course list but requires authentication to read assignments', async () => {
   const courses = await fetch(`${base}/api/courses`).then((r) => r.json());
-  const assignments = await fetch(`${base}/api/assignments`).then((r) => r.json());
   assert.equal(courses.success, true);
-  assert.equal(assignments.success, true);
   assert.ok(courses.data.every((item) => !('password_hash' in item)));
-  assert.ok(assignments.data.every((item) => item.status === 'PUBLISHED' && !('student_code' in item) && !('password_hash' in item)));
+  assert.equal((await fetch(`${base}/api/assignments`)).status, 401);
+  assert.equal((await fetch(`${base}/api/assignments/1`)).status, 401);
 });
 
 test('rejects missing/invalid auth and handles validation and 404 responses', async () => {
@@ -32,10 +31,18 @@ test('rejects missing/invalid auth and handles validation and 404 responses', as
   assert.equal(badLogin.status, 401);
   assert.ok(!JSON.stringify(await badLogin.json()).includes('password_hash'));
   assert.equal((await fetch(`${base}/api/auth/me`)).status, 401);
+  assert.equal((await fetch(`${base}/api/auth/password`, { method: 'PATCH' })).status, 401);
   assert.equal((await fetch(`${base}/api/auth/me`, { headers: { authorization: 'Bearer invalid' } })).status, 401);
+  assert.equal((await fetch(`${base}/api/auth/student/me`)).status, 401);
+  assert.equal((await fetch(`${base}/api/auth/student/password`, { method: 'PATCH' })).status, 401);
+  assert.equal((await fetch(`${base}/api/student/courses`)).status, 401);
+  assert.equal((await fetch(`${base}/api/student/assignments`)).status, 401);
   assert.equal((await fetch(`${base}/api/courses/mine`)).status, 401);
+  assert.equal((await fetch(`${base}/api/courses/enrollments/mine`)).status, 401);
+  assert.equal((await fetch(`${base}/api/courses/1/enrollments/1`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'APPROVED' }) })).status, 401);
   assert.equal((await fetch(`${base}/api/assignments/mine`)).status, 401);
   assert.equal((await fetch(`${base}/api/assignments/1/submissions/1`, { method: 'PATCH' })).status, 401);
+  assert.equal((await fetch(`${base}/api/assignments/1/submissions/1/preview`)).status, 401);
   assert.equal((await fetch(`${base}/api/courses/not-an-id`)).status, 400);
   assert.equal((await fetch(`${base}/api/no-such-route`)).status, 404);
   assert.equal((await fetch(`${base}/api/courses`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ course_code: 'UNAUTH', course_name: 'Denied' }) })).status, 401);

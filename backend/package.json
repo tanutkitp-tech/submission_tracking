@@ -9,6 +9,11 @@
     "test": "node --test",
     "test:integration": "node --test tests/integration.js",
     "check:schema": "node scripts/check-schema.js",
+    "migrate:student-auth": "node scripts/migrate-student-auth.js",
+    "migrate:password-hashes": "node scripts/migrate-password-hashes.js",
+    "migrate:enrollment-approval": "node scripts/migrate-enrollment-approval.js",
+    "migrate:submission-files": "node scripts/migrate-submission-files.js",
+    "migrate:assignment-max-score": "node scripts/migrate-assignment-max-score.js",
     "seed:teacher": "node scripts/create-teacher.js"
   },
   "keywords": [],
@@ -21,6 +26,7 @@
     "dotenv": "^18.0.7",
     "express": "^5.3.0",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^2.4.0",
     "mysql2": "^3.24.5"
   }
 }

@@ -3,6 +3,7 @@ const cors = require('cors');
 const authRoutes = require('./routes/auth');
 const courseRoutes = require('./routes/courses');
 const assignmentRoutes = require('./routes/assignments');
+const studentRoutes = require('./routes/students');
 const db = require('./config/database');
 const { notFound, errorHandler } = require('./middleware/errors');
 
@@ -24,6 +25,7 @@ app.get('/api/health/db', async (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/courses', courseRoutes);
 app.use('/api/assignments', assignmentRoutes);
+app.use('/api/student', studentRoutes);
 app.use(notFound);
 app.use(errorHandler);
 module.exports = app;

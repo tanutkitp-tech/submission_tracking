@@ -1,16 +1,22 @@
-const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../config/database');
 const HttpError = require('../utils/http-error');
+const passwordService = require('./password-service');
 
 async function login(email, password) {
   const [rows] = await db.execute('SELECT id, full_name, email, password_hash FROM teachers WHERE email = ?', [email]);
-  if (!rows.length || !(await bcrypt.compare(password, rows[0].password_hash))) throw new HttpError(401, 'Email or password is incorrect');
+  if (!rows.length || !(await passwordService.verifyAndUpgradeLegacyPassword('teachers', rows[0].id, password, rows[0].password_hash))) throw new HttpError(401, 'Email or password is incorrect');
   const teacher = rows[0];
   const token = jwt.sign({ role: 'teacher', email: teacher.email }, process.env.JWT_SECRET, {
     subject: String(teacher.id), algorithm: 'HS256', expiresIn: process.env.JWT_EXPIRES_IN || '8h',
   });
   return { token, teacher: { id: teacher.id, full_name: teacher.full_name, email: teacher.email } };
+}
+
+async function changePassword(teacherId, currentPassword, newPassword) {
+  const changed = await passwordService.changePassword('teachers', teacherId, currentPassword, newPassword);
+  if (!changed) throw new HttpError(400, 'Current password is incorrect');
+  return { updated: true };
 }
 
 async function getTeacherById(id) {
@@ -19,4 +25,4 @@ async function getTeacherById(id) {
   return rows[0];
 }
 
-module.exports = { login, getTeacherById };
+module.exports = { login, getTeacherById, changePassword };

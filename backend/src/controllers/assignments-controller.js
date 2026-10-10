@@ -1,5 +1,6 @@
 const assignmentService = require('../services/assignment-service');
-const { validateAssignment, validateAssignmentId, validateSubmissionParams, validateAssignmentListQuery } = require('../validators/assignment-validator');
+const { validateAssignment, validateAssignmentId, validateSubmissionParams, validateSubmissionReview, validateAssignmentListQuery } = require('../validators/assignment-validator');
+const submissionService = require('../services/submission-service');
 
 async function list(req, res) {
   const data = await assignmentService.listPublic();
@@ -31,8 +32,26 @@ async function submissions(req, res) {
 }
 async function markReviewed(req, res) {
   const { assignmentId, studentId } = validateSubmissionParams(req.params);
-  const data = await assignmentService.markReviewed(req.user.id, assignmentId, studentId);
+  const data = await submissionService.grade(req.user.id, assignmentId, studentId, validateSubmissionReview(req.body));
   res.json({ success: true, message: 'Submission marked as reviewed', data });
 }
+async function downloadSubmission(req, res) {
+  const { assignmentId, studentId } = validateSubmissionParams(req.params);
+  const file = await submissionService.getTeacherFile(req.user.id, assignmentId, studentId);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.download(file.path, file.name);
+}
 
-module.exports = { list, listMine, get, create, update, remove, submissions, markReviewed };
+async function previewSubmission(req, res) {
+  const { assignmentId, studentId } = validateSubmissionParams(req.params);
+  const file = await submissionService.getTeacherPreview(req.user.id, assignmentId, studentId);
+  res.set({
+    'Content-Type': file.contentType,
+    'Content-Disposition': 'inline',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "default-src 'none'; sandbox",
+  });
+  res.send(file.buffer);
+}
+
+module.exports = { list, listMine, get, create, update, remove, submissions, markReviewed, downloadSubmission, previewSubmission };

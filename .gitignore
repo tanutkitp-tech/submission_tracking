@@ -3,5 +3,6 @@ node_modules/
 dist/
 .env
 **/.env
+backend/storage/submissions/
 npm-debug.log*
 .DS_Store

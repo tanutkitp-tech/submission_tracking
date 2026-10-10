@@ -5,10 +5,10 @@ const db = require('../src/config/database');
 const required = {
   teachers: ['id', 'full_name', 'email', 'password_hash'],
   courses: ['id', 'course_code', 'course_name', 'description', 'teacher_id'],
-  students: ['id', 'student_code', 'full_name'],
-  enrollments: ['id', 'course_id', 'student_id'],
-  assignments: ['id', 'course_id', 'title', 'description', 'due_at', 'status', 'created_by'],
-  submissions: ['id', 'assignment_id', 'student_id', 'status', 'submitted_at', 'remarks'],
+  students: ['id', 'student_code', 'full_name', 'password_hash'],
+  enrollments: ['id', 'course_id', 'student_id', 'enrollment_status', 'enrolled_at', 'reviewed_at'],
+  assignments: ['id', 'course_id', 'title', 'description', 'due_at', 'max_score', 'status', 'created_by'],
+  submissions: ['id', 'assignment_id', 'student_id', 'status', 'submitted_at', 'remarks', 'file_storage_key', 'file_original_name', 'file_mime_type', 'file_size', 'score'],
 };
 
 async function main() {

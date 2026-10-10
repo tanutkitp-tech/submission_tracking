@@ -4,6 +4,8 @@ const { requireAuth } = require('../middleware/auth');
 
 router.get('/', controller.list);
 router.get('/mine', requireAuth, controller.listMine);
+router.get('/enrollments/mine', requireAuth, controller.listEnrollments);
+router.patch('/:id/enrollments/:studentId', requireAuth, controller.reviewEnrollment);
 router.get('/:id', controller.get);
 router.post('/', requireAuth, controller.create);
 router.put('/:id', requireAuth, controller.update);
