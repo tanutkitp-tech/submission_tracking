@@ -66,6 +66,9 @@ function friendlyError(error, context = "") {
     return "ลบงานไม่ได้ เพราะมี submission ที่เกี่ยวข้อง";
   }
   if (error?.status === 409) {
+    if (error.message === "Assignment has submissions and cannot be moved to another course") {
+      return "ย้ายงานไม่ได้ เพราะมี submission ของนิสิตแล้ว";
+    }
     if (error.message === "New maximum score is lower than an existing submission score") {
       return "ลดคะแนนเต็มไม่ได้ เพราะมีคะแนนที่บันทึกไว้สูงกว่าคะแนนเต็มใหม่";
     }

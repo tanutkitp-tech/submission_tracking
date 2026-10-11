@@ -10,24 +10,32 @@ const { validatePasswordChangeBody } = require('../src/validators/password-valid
 const { validateEnrollmentBody, validateEnrollmentReviewBody } = require('../src/validators/student-validator');
 const passwordService = require('../src/services/password-service');
 const previewContentType = require('../src/utils/preview-content-type');
+const { createDatabaseFacade, BANGKOK_SESSION_TIME_ZONE } = require('../src/config/database-facade');
+const { isAllowedOrigin } = require('../src/utils/cors-origin');
 
 test('validates positive integer identifiers', () => {
   assert.equal(idParam('12'), 12);
   assert.throws(() => idParam('0'), HttpError);
+  assert.throws(() => idParam('9007199254740992'), HttpError);
   assert.throws(() => idParam('1; DROP TABLE courses'), HttpError);
+  assert.throws(() => idParam(['1']), HttpError);
 });
 test('validates bounded text and optional values', () => {
   assert.equal(text('  Intro  ', 'title', 20), 'Intro');
   assert.equal(text(null, 'description', 20, false), null);
   assert.throws(() => text('', 'title', 20), HttpError);
   assert.throws(() => text('x'.repeat(21), 'title', 20), HttpError);
+  assert.throws(() => text('ท'.repeat(22_000), 'description', 65_535, false, 65_535), HttpError);
 });
 test('validates date and time inputs', () => {
   assert.equal(dateTime('2026-11-30T12:00'), '2026-11-30 12:00');
   assert.equal(dateTime('2026-11-30T12:00:00Z'), '2026-11-30 19:00:00');
   assert.equal(dateTime('2026-11-30T12:00:00+07:00'), '2026-11-30 12:00:00');
   assert.equal(dateTime('2026-11-30T12:00:00-05:00'), '2026-12-01 00:00:00');
+  assert.equal(dateTime('2026-11-30T12:00:00.000Z'), '2026-11-30 19:00:00');
+  assert.equal(dateTime('2026-11-30T12:00:00.123456Z'), '2026-11-30 19:00:00');
   assert.throws(() => dateTime('not-a-date'), HttpError);
+  assert.throws(() => dateTime('2026-11-30 12:00'), HttpError);
   assert.throws(() => dateTime('2026-02-30T12:00'), HttpError);
   assert.throws(() => dateTime('2026-11-30T12:00:00+15:00'), HttpError);
 });
@@ -40,15 +48,91 @@ test('requires a score before marking a submission reviewed', () => {
 });
 
 test('validates assignment course, status, title, and deadline', () => {
-  const item = validateAssignment({ course_id: 2, title: 'Lab 1', due_at: '2026-11-30T12:00', status: 'PUBLISHED' });
+  const dueAt = new Date(Date.now() + 86_400_000).toISOString();
+  const item = validateAssignment({ course_id: 2, title: 'Lab 1', due_at: dueAt, status: 'PUBLISHED' });
   assert.equal(item.courseId, 2);
   assert.equal(item.status, 'PUBLISHED');
   assert.equal(item.maxScore, undefined);
-  assert.equal(validateAssignment({ course_id: 2, title: 'Lab', due_at: '2026-11-30T12:00', max_score: '30.50' }).maxScore, 30.5);
-  assert.throws(() => validateAssignment({ course_id: 2, title: 'Lab', due_at: '2026-11-30T12:00', max_score: 0 }), HttpError);
-  assert.throws(() => validateAssignment({ course_id: 2, title: 'Lab', due_at: '2026-11-30T12:00', max_score: 1000000 }), HttpError);
-  assert.throws(() => validateAssignment({ course_id: 2, title: 'Lab', due_at: '2026-11-30T12:00', status: 'OPEN' }), HttpError);
+  assert.equal(validateAssignment({ course_id: 2, title: 'Lab', due_at: dueAt, max_score: '30.50' }).maxScore, 30.5);
+  assert.equal(validateAssignment({ course_id: 2, title: 'Lab', due_at: dueAt, status: 'PUBLISHED' }).dueAt, dateTime(dueAt));
+  assert.equal(validateAssignment({ course_id: 2, title: 'Lab', due_at: dueAt }).status, 'DRAFT');
+  assert.equal(validateAssignment({ course_id: 2, title: 'Lab', due_at: dueAt }, { isUpdate: true }).status, undefined);
+  assert.throws(() => validateAssignment({ course_id: 2, title: 'Lab', due_at: dueAt, max_score: 0 }), HttpError);
+  assert.throws(() => validateAssignment({ course_id: 2, title: 'Lab', due_at: dueAt, max_score: 1000000 }), HttpError);
+  assert.throws(() => validateAssignment({ course_id: 2, title: 'Lab', due_at: dueAt, status: '' }), HttpError);
+  assert.throws(() => validateAssignment({ course_id: 2, title: 'Lab', due_at: dueAt, status: 'OPEN' }), HttpError);
+  assert.throws(() => validateAssignment({ course_id: 2, title: 'Lab', due_at: dueAt, made_up: true }), HttpError);
+  assert.throws(() => validateAssignment({ course_id: 2, title: 'Lab', due_at: new Date(Date.now() - 60_000).toISOString() }), HttpError);
   assert.throws(() => validateAssignment(null), HttpError);
+});
+
+test('preserves assignment status on PUT when omitted', async () => {
+  const db = require('../src/config/database');
+  const assignmentService = require('../src/services/assignment-service');
+  const originalGetConnection = db.getConnection;
+  let updateParameters;
+  let committed = false;
+  const connection = {
+    beginTransaction: async () => {},
+    commit: async () => { committed = true; },
+    rollback: async () => {},
+    release: () => {},
+    execute: async (sql, parameters) => {
+      if (sql.startsWith('SELECT a.id,a.course_id,a.max_score,a.status')) {
+        return [[{ id: 9, course_id: 2, max_score: 100, status: 'PUBLISHED' }]];
+      }
+      if (sql.startsWith('SELECT id FROM courses')) return [[{ id: parameters[0] }]];
+      if (sql.startsWith('UPDATE assignments')) {
+        updateParameters = parameters;
+        return [{ affectedRows: 1 }];
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+  db.getConnection = async () => connection;
+  try {
+    const dueAt = new Date(Date.now() + 86_400_000).toISOString();
+    const item = validateAssignment({ course_id: 2, title: 'Updated title', due_at: dueAt }, { isUpdate: true });
+    const result = await assignmentService.update(4, 9, item);
+    assert.equal(result.status, 'PUBLISHED');
+    assert.equal(updateParameters[5], 'PUBLISHED');
+    assert.equal(committed, true);
+  } finally {
+    db.getConnection = originalGetConnection;
+  }
+});
+
+test('rejects moving an assignment after a submission exists', async () => {
+  const db = require('../src/config/database');
+  const assignmentService = require('../src/services/assignment-service');
+  const originalGetConnection = db.getConnection;
+  let updateCalled = false;
+  let rolledBack = false;
+  const connection = {
+    beginTransaction: async () => {},
+    commit: async () => {},
+    rollback: async () => { rolledBack = true; },
+    release: () => {},
+    execute: async (sql, parameters) => {
+      if (sql.startsWith('SELECT a.id,a.course_id,a.max_score,a.status')) {
+        return [[{ id: 9, course_id: 2, max_score: 100, status: 'PUBLISHED' }]];
+      }
+      if (sql.startsWith('SELECT id FROM courses')) return [[{ id: parameters[0] }]];
+      if (sql.startsWith('SELECT COUNT(*) AS submissions')) return [[{ submissions: 1 }]];
+      if (sql.startsWith('UPDATE assignments')) updateCalled = true;
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+  db.getConnection = async () => connection;
+  try {
+    const dueAt = new Date(Date.now() + 86_400_000).toISOString();
+    const item = validateAssignment({ course_id: 3, title: 'Moved title', due_at: dueAt }, { isUpdate: true });
+    await assert.rejects(assignmentService.update(4, 9, item), (error) => error.status === 409);
+    assert.equal(updateCalled, false);
+    assert.equal(rolledBack, true);
+  } finally {
+    db.getConnection = originalGetConnection;
+  }
 });
 
 test('limits inline file previews to signatures of supported file formats', () => {
@@ -104,4 +188,75 @@ test('validates pagination bounds and calculates offsets', () => {
   assert.deepEqual(pagination({ page: '3', limit: '10' }), { page: 3, limit: 10, offset: 20 });
   assert.throws(() => pagination({ page: '0' }), HttpError);
   assert.throws(() => pagination({ limit: '101' }), HttpError);
+  assert.throws(() => pagination({ page: '1e2' }), HttpError);
+  assert.throws(() => pagination({ page: ['2'] }), HttpError);
+  assert.throws(() => pagination({ page: '1', offset: '20' }), HttpError);
+});
+
+test('rejects request fields that are outside each API contract', () => {
+  assert.throws(() => validateLoginBody({ email: 'teacher@example.com', password: 'x', role: 'student' }), HttpError);
+  assert.throws(() => validateCourseBody({ course_code: 'CS101', course_name: 'Intro', teacher_id: 2 }), HttpError);
+  assert.throws(() => validateStudentRegisterBody({ student_code: '66001', full_name: 'Student', password: 'long-pass-123', id: 1 }), HttpError);
+  assert.throws(() => validateStudentLoginBody({ student_code: '66001', password: 'long-pass-123', full_name: 'Other' }), HttpError);
+  assert.throws(() => validateEnrollmentBody({ course_id: 4, student_id: 2 }), HttpError);
+  assert.throws(() => validateEnrollmentReviewBody({ status: 'APPROVED', student_id: 2 }), HttpError);
+  assert.throws(() => validatePasswordChangeBody({ current_password: 'current-pass', new_password: 'new-pass-123', id: 1 }), HttpError);
+});
+
+test('sets Bangkok timezone for every pooled database connection', async () => {
+  const calls = [];
+  const connection = {
+    query: async (sql) => { calls.push(sql); },
+    execute: async (sql) => { calls.push(sql); return [[], []]; },
+    release: () => calls.push('release'),
+  };
+  const facade = createDatabaseFacade({ getConnection: async () => connection, end: async () => {} });
+  await facade.execute('SELECT CURRENT_TIMESTAMP');
+  assert.deepEqual(calls, [BANGKOK_SESSION_TIME_ZONE, 'SELECT CURRENT_TIMESTAMP', 'release']);
+  calls.length = 0;
+  const transactionConnection = await facade.getConnection();
+  assert.equal(transactionConnection, connection);
+  assert.deepEqual(calls, [BANGKOK_SESSION_TIME_ZONE]);
+});
+
+test('allows local Vite fallback ports only outside production', () => {
+  assert.equal(isAllowedOrigin('http://localhost:5174', ['http://localhost:5173'], false), true);
+  assert.equal(isAllowedOrigin('http://127.0.0.1:5173', [], false), true);
+  assert.equal(isAllowedOrigin('http://localhost:5175', [], false), false);
+  assert.equal(isAllowedOrigin('http://localhost:5174', ['https://tester.example'], true), false);
+  assert.equal(isAllowedOrigin('https://tester.example', ['https://tester.example'], true), true);
+});
+
+test('grades a submission transactionally and keeps score within the locked assignment maximum', async () => {
+  const db = require('../src/config/database');
+  const submissionService = require('../src/services/submission-service');
+  const originalGetConnection = db.getConnection;
+  const calls = [];
+  let committed = false;
+  let rolledBack = false;
+  const resultRow = { assignment_id: 9, student_id: 6, status: 'REVIEWED', score: '84.50', remarks: 'Good' };
+  const connection = {
+    beginTransaction: async () => calls.push('begin'),
+    commit: async () => { committed = true; },
+    rollback: async () => { rolledBack = true; },
+    release: () => calls.push('release'),
+    execute: async (sql) => {
+      calls.push(sql);
+      if (sql.startsWith('SELECT a.id, a.max_score')) return [[{ id: 9, max_score: '100.00' }]];
+      if (sql.startsWith('SELECT id, score, remarks')) return [[{ id: 3, score: null, remarks: null }]];
+      if (sql.startsWith('UPDATE submissions')) return [{ affectedRows: 1 }];
+      if (sql.startsWith('SELECT assignment_id, student_id, status')) return [[resultRow]];
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+  db.getConnection = async () => connection;
+  try {
+    const result = await submissionService.grade(4, 9, 6, { score: 84.5, remarks: 'Good' });
+    assert.deepEqual(result, resultRow);
+    assert.equal(committed, true);
+    assert.equal(rolledBack, false);
+    assert.ok(calls.some((sql) => typeof sql === 'string' && sql.includes('FOR UPDATE')));
+  } finally {
+    db.getConnection = originalGetConnection;
+  }
 });

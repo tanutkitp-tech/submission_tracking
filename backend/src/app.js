@@ -6,13 +6,14 @@ const assignmentRoutes = require('./routes/assignments');
 const studentRoutes = require('./routes/students');
 const db = require('./config/database');
 const { notFound, errorHandler } = require('./middleware/errors');
+const { isAllowedOrigin } = require('./utils/cors-origin');
 
 const app = express();
 const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173').split(',').map((item) => item.trim()).filter(Boolean);
 app.disable('x-powered-by');
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    if (isAllowedOrigin(origin, allowedOrigins, process.env.NODE_ENV === 'production')) return callback(null, true);
     return callback(new Error('Origin is not allowed by CORS'));
   }
 }));

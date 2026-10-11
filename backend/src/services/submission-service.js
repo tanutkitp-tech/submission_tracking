@@ -96,33 +96,44 @@ async function getTeacherPreview(teacherId, assignmentId, studentId) {
 }
 
 async function grade(teacherId, assignmentId, studentId, values) {
-  const [owned] = await db.execute(
-    'SELECT a.id, a.max_score FROM assignments a JOIN courses c ON c.id = a.course_id WHERE a.id = ? AND a.created_by = ? AND c.teacher_id = ?',
-    [assignmentId, teacherId, teacherId],
-  );
-  if (!owned.length) {
-    const [exists] = await db.execute('SELECT id FROM assignments WHERE id = ?', [assignmentId]);
-    throw new HttpError(exists.length ? 403 : 404, exists.length ? 'You cannot review submissions for this assignment' : 'Assignment not found');
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [owned] = await connection.execute(
+      'SELECT a.id, a.max_score FROM assignments a JOIN courses c ON c.id = a.course_id WHERE a.id = ? AND a.created_by = ? AND c.teacher_id = ? FOR UPDATE',
+      [assignmentId, teacherId, teacherId],
+    );
+    if (!owned.length) {
+      const [exists] = await connection.execute('SELECT id FROM assignments WHERE id = ?', [assignmentId]);
+      throw new HttpError(exists.length ? 403 : 404, exists.length ? 'You cannot review submissions for this assignment' : 'Assignment not found');
+    }
+    const [existing] = await connection.execute(
+      'SELECT id, score, remarks FROM submissions WHERE assignment_id = ? AND student_id = ? FOR UPDATE',
+      [assignmentId, studentId],
+    );
+    if (!existing.length) throw new HttpError(404, 'Submission not found');
+    const score = values.score;
+    if (score == null) throw new HttpError(400, 'Score is required to mark submission as reviewed');
+    if (Number(score) > Number(owned[0].max_score)) {
+      throw new HttpError(400, `Score cannot exceed the assignment maximum of ${owned[0].max_score}`);
+    }
+    const remarks = Object.hasOwn(values, 'remarks') ? values.remarks : existing[0].remarks;
+    await connection.execute(
+      "UPDATE submissions SET status = 'REVIEWED', score = ?, remarks = ? WHERE id = ?",
+      [score, remarks, existing[0].id],
+    );
+    const [rows] = await connection.execute(
+      'SELECT assignment_id, student_id, status, score, remarks, submitted_at, file_original_name, file_size FROM submissions WHERE id = ?',
+      [existing[0].id],
+    );
+    await connection.commit();
+    return rows[0];
+  } catch (error) {
+    await connection.rollback().catch(() => {});
+    throw error;
+  } finally {
+    connection.release();
   }
-  const [existing] = await db.execute(
-    'SELECT id, score, remarks FROM submissions WHERE assignment_id = ? AND student_id = ?',
-    [assignmentId, studentId],
-  );
-  if (!existing.length) throw new HttpError(404, 'Submission not found');
-  const score = values.score;
-  if (score != null && Number(score) > Number(owned[0].max_score)) {
-    throw new HttpError(400, `Score cannot exceed the assignment maximum of ${owned[0].max_score}`);
-  }
-  const remarks = Object.hasOwn(values, 'remarks') ? values.remarks : existing[0].remarks;
-  await db.execute(
-    "UPDATE submissions SET status = 'REVIEWED', score = ?, remarks = ? WHERE id = ?",
-    [score, remarks, existing[0].id],
-  );
-  const [rows] = await db.execute(
-    'SELECT assignment_id, student_id, status, score, remarks, submitted_at, file_original_name, file_size FROM submissions WHERE id = ?',
-    [existing[0].id],
-  );
-  return rows[0];
 }
 
 module.exports = { submit, getTeacherFile, getTeacherPreview, grade };

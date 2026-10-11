@@ -1,17 +1,20 @@
-const { idParam, text, dateTime, fail, pagination } = require('../utils/validation');
+const { idParam, text, dateTime, fail, pagination, objectBody } = require('../utils/validation');
 const statuses = ['DRAFT', 'PUBLISHED', 'CLOSED'];
+const assignmentFields = ['course_id', 'title', 'description', 'due_at', 'max_score', 'status'];
 
-function validateAssignment(body) {
-  body = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+function validateAssignment(body, { isUpdate = false } = {}) {
+  body = objectBody(body, assignmentFields, 'assignment');
   const courseId = idParam(body.course_id);
   const title = text(body.title, 'title', 200);
-  const description = text(body.description, 'description', 65535, false);
+  const description = text(body.description, 'description', 65535, false, 65535);
   const dueAt = dateTime(body.due_at);
   if (Date.parse(`${dueAt.replace(' ', 'T')}+07:00`) <= Date.now()) {
     fail('due_at must be in the future');
   }
-  const status = body.status || 'DRAFT';
-  if (!statuses.includes(status)) fail('Invalid assignment status');
+  const status = Object.hasOwn(body, 'status')
+    ? body.status
+    : isUpdate ? undefined : 'DRAFT';
+  if (status !== undefined && !statuses.includes(status)) fail('Invalid assignment status');
   let maxScore;
   if (Object.hasOwn(body, 'max_score')) {
     const rawScore = String(body.max_score);
@@ -28,7 +31,7 @@ function validateSubmissionParams(params) {
   return { assignmentId: idParam(params.id), studentId: idParam(params.studentId) };
 }
 function validateSubmissionReview(body = {}) {
-  body = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  body = objectBody(body, ['score', 'remarks'], 'submission review');
   const result = {};
   if (!Object.hasOwn(body, 'score') || body.score == null || body.score === '') {
     fail('Score is required to mark submission as reviewed');

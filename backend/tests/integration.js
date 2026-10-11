@@ -25,6 +25,14 @@ test('serves public course list but requires authentication to read assignments'
   assert.equal((await fetch(`${base}/api/assignments/1`)).status, 401);
 });
 
+test('supports the Vite fallback port and uses the Bangkok database session timezone', async () => {
+  const health = await fetch(`${base}/api/health`, { headers: { origin: 'http://localhost:5174' } });
+  assert.equal(health.status, 200);
+  assert.equal(health.headers.get('access-control-allow-origin'), 'http://localhost:5174');
+  const [rows] = await db.execute('SELECT @@session.time_zone AS timeZone');
+  assert.equal(rows[0].timeZone, '+07:00');
+});
+
 test('rejects missing/invalid auth and handles validation and 404 responses', async () => {
   assert.equal((await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'not-an-email', password: 'wrong' }) })).status, 400);
   const badLogin = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'no-such-user@example.invalid', password: 'incorrect-password' }) });

@@ -1,5 +1,5 @@
 const HttpError = require('../utils/http-error');
-const { text } = require('../utils/validation');
+const { text, objectBody } = require('../utils/validation');
 
 function passwordValue(value) {
   if (typeof value !== 'string' || value.length < 8 || Buffer.byteLength(value, 'utf8') > 72) {
@@ -9,7 +9,7 @@ function passwordValue(value) {
 }
 
 function validateStudentRegisterBody(body = {}) {
-  body = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  body = objectBody(body, ['student_code', 'full_name', 'password'], 'student registration');
   return {
     studentCode: text(body.student_code, 'student_code', 30),
     fullName: text(body.full_name, 'full_name', 150),
@@ -18,7 +18,7 @@ function validateStudentRegisterBody(body = {}) {
 }
 
 function validateStudentLoginBody(body = {}) {
-  body = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  body = objectBody(body, ['student_code', 'password'], 'student login');
   return {
     studentCode: text(body.student_code, 'student_code', 30),
     password: passwordValue(body.password),

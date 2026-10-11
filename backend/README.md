@@ -59,8 +59,8 @@
 | GET | `/api/assignments` | อาจารย์ | เฉพาะ `PUBLISHED`; มีข้อมูลรายวิชา ไม่มีข้อมูลนิสิต |
 | GET | `/api/assignments/mine` | อาจารย์ | งานทุกสถานะที่อาจารย์ปัจจุบันจัดการได้ รวม Draft/Closed |
 | GET | `/api/assignments/:id` | อาจารย์ | คืน 404 สำหรับ Draft/Closed |
-| POST | `/api/assignments` | อาจารย์เจ้าของรายวิชา | body `course_id`, `title`, `description`, `due_at` (ISO datetime; รองรับ `Z` และ UTC offset แล้วแปลงเป็นเวลา Asia/Bangkok; datetime-local ที่ไม่มี offset ถือเป็นเวลา Asia/Bangkok), `max_score` (optional, default 100, positive, up to 2 decimals), `status` (`DRAFT`/`PUBLISHED`/`CLOSED`); `created_by` ใช้ token |
-| PUT | `/api/assignments/:id` | ผู้สร้าง/เจ้าของ | body เหมือน POST; ตรวจทั้งเจ้าของ assignment และรายวิชา; ถ้าไม่ส่ง `max_score` จะคงค่าเดิม; submission เดิมยังปรากฏในรายชื่อหลังย้ายงานไปอีกรายวิชาภายใต้อาจารย์คนเดิม |
+| POST | `/api/assignments` | อาจารย์เจ้าของรายวิชา | body รับเฉพาะ `course_id`, `title`, `description`, `due_at`, `max_score`, `status`; `description` optional; `due_at` ต้องเป็น ISO datetime ในอนาคต รับ `Z` หรือ UTC offset แล้วแปลงเป็นเวลา Asia/Bangkok; datetime-local ที่ไม่มี offset ถือเป็นเวลา Asia/Bangkok; `max_score` optional (default 100, positive, up to 2 decimals); `status` optional (default `DRAFT`, รับ `DRAFT`/`PUBLISHED`/`CLOSED`); `created_by` ใช้ token |
+| PUT | `/api/assignments/:id` | ผู้สร้าง/เจ้าของ | body รับเฉพาะ fields เดียวกับ POST; ตรวจทั้งเจ้าของ assignment และรายวิชา; ถ้าไม่ส่ง `max_score` หรือ `status` จะคงค่าเดิม; ย้ายไปรายวิชาอื่นไม่ได้เมื่อมี submission และตอบ 409; งานที่ยังไม่มี submission ย้ายได้เฉพาะรายวิชาที่อาจารย์เป็นเจ้าของ |
 | DELETE | `/api/assignments/:id` | ผู้สร้าง | 409 เมื่อ constraint ป้องกันการลบ |
 | GET | `/api/assignments/:id/submissions` | อาจารย์เจ้าของงาน | สถานะนิสิตที่ลงทะเบียนในรายวิชานั้น; `status` เป็น null หากยังไม่มี submission |
 | GET | `/api/assignments/:id/submissions/:studentId/file` | อาจารย์เจ้าของงาน | ดาวน์โหลดไฟล์ของนิสิตเป็น attachment; ใช้ token อาจารย์ |
@@ -76,6 +76,10 @@
 
 การดูงานทุก endpoint ต้องเข้าสู่ระบบก่อน: API งานรวมเดิมจำกัดอาจารย์ ส่วน Student endpoints ตรวจ JWT role และแสดงงานเฉพาะ enrollment สถานะ `APPROVED`. งาน Draft และ Closed ไม่ปรากฏในรายการงานของนิสิต. การสมัครสร้างแถว `students`; การขอลงทะเบียนสร้างแถว `enrollments` สถานะ `PENDING`; อาจารย์เจ้าของรายวิชาเท่านั้นที่อนุมัติหรือปฏิเสธได้. รหัสผ่านเปลี่ยนได้หลังยืนยันรหัสเดิม; phpMyAdmin จะแสดง bcrypt hash ไม่ใช่รหัสที่อ่านได้. บัญชีเก่าที่มีรหัสผ่าน plaintext ในคอลัมน์ `password_hash` จะถูกแฮชใหม่เมื่อเข้าสู่ระบบสำเร็จ. ไฟล์ submission เก็บใน `backend/storage/submissions` โดยใช้ชื่อสุ่มที่ไม่เปิดเผยต่อสาธารณะ; ตาราง `submissions` เก็บ metadata และคะแนนเท่านั้น การโหลดไฟล์ต้องผ่าน API ที่ตรวจ token อาจารย์เจ้าของงานและส่งเป็น attachment.
 
+Datetime ที่ส่งเข้ามาพร้อม timezone จะถูกแปลงเป็นเวลา Asia/Bangkok ก่อนเก็บ เพราะคอลัมน์ `assignments.due_at` เป็น MySQL `DATETIME` ซึ่งเก็บค่าเวลาโดยไม่เก็บ timezone; ค่า `due_at` ใน response จึงเป็นเวลา Bangkok แบบไม่มี suffix timezone. ทุก body ที่เขียนข้อมูลจะปฏิเสธ field ที่ไม่อยู่ในสัญญา API ด้วย 400; query ของ pagination รับเฉพาะ `page` และ `limit` และต้องเป็นจำนวนเต็ม.
+
+ทุก connection ของ Backend ตั้ง MySQL session timezone เป็น `+07:00` ก่อน query เพื่อให้ `CURRENT_TIMESTAMP`, เวลา `TIMESTAMP` และกำหนดส่งใน `DATETIME` ใช้เวลาไทยตรงกัน โดยไม่ขึ้นกับ timezone ของเครื่องที่รัน MySQL.
+
 ## ทดสอบ
 
 - Automated unit tests: `npm test`.
@@ -84,4 +88,4 @@
 - API integration ต้องเปิด MySQL จริงและตั้ง `.env`; ใช้ `npm start` แล้วตรวจ `GET /api/health/db` และคำขอจริงใน Postman.
 - Postman: ตั้ง `baseUrl=http://localhost:3000`. เรียก login แล้วใส่ token เป็น Bearer Token สำหรับ `/me` และ CRUD. ตรวจกรณีไม่มี token (401), token ผิด/หมดอายุ (401), เปลี่ยนเจ้าของ (403), ID ไม่มี (404), input ผิด (400), duplicate/FK conflict (409), และ DB หยุดทำงาน (`/api/health/db` ตอบ 500).
 
-`CORS_ORIGINS` รับ origin คั่นด้วย comma; ค่าเริ่มต้น `http://localhost:5173`. ปรับให้ตรงกับ frontend ที่ deploy.
+`CORS_ORIGINS` รับ origin คั่นด้วย comma. ในโหมดพัฒนา Backend ยอมรับหน้า Vite จาก `localhost` หรือ `127.0.0.1` ที่พอร์ต 5173/5174 เพื่อรองรับกรณีพอร์ตหลักถูกใช้งาน; เมื่อ `NODE_ENV=production` จะยอมรับเฉพาะ origin ที่ระบุใน `CORS_ORIGINS`.

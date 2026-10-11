@@ -19,7 +19,7 @@ async function create(req, res) {
   res.status(201).json({ success: true, message: 'Assignment created', data });
 }
 async function update(req, res) {
-  const data = await assignmentService.update(req.user.id, validateAssignmentId(req.params), validateAssignment(req.body));
+  const data = await assignmentService.update(req.user.id, validateAssignmentId(req.params), validateAssignment(req.body, { isUpdate: true }));
   res.json({ success: true, message: 'Assignment updated', data });
 }
 async function remove(req, res) {

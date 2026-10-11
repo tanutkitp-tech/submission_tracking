@@ -25,22 +25,47 @@ async function create(teacherId, item) {
   return { id: result.insertId, course_id: item.courseId, title: item.title, description: item.description, due_at: item.dueAt, max_score: maxScore, status: item.status, created_by: teacherId };
 }
 async function update(teacherId, id, item) {
-  const [owned] = await db.execute('SELECT a.id,a.max_score FROM assignments a JOIN courses c ON c.id=a.course_id WHERE a.id=? AND c.teacher_id=? AND a.created_by=?', [id, teacherId, teacherId]);
-  if (!owned.length) {
-    const [exists] = await db.execute('SELECT id FROM assignments WHERE id=?', [id]);
-    throw new HttpError(exists.length ? 403 : 404, exists.length ? 'You cannot modify this assignment' : 'Assignment not found');
-  }
-  const [course] = await db.execute('SELECT id FROM courses WHERE id=? AND teacher_id=?', [item.courseId, teacherId]);
-  if (!course.length) throw new HttpError(404, 'Course not found');
-  const maxScore = item.maxScore ?? Number(owned[0].max_score);
-  if (maxScore < Number(owned[0].max_score)) {
-    const [grades] = await db.execute('SELECT MAX(score) AS highest_score FROM submissions WHERE assignment_id=?', [id]);
-    if (grades[0].highest_score != null && Number(grades[0].highest_score) > maxScore) {
-      throw new HttpError(409, 'New maximum score is lower than an existing submission score');
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [owned] = await connection.execute(
+      'SELECT a.id,a.course_id,a.max_score,a.status FROM assignments a JOIN courses c ON c.id=a.course_id WHERE a.id=? AND c.teacher_id=? AND a.created_by=? FOR UPDATE',
+      [id, teacherId, teacherId],
+    );
+    if (!owned.length) {
+      const [exists] = await connection.execute('SELECT id FROM assignments WHERE id=?', [id]);
+      throw new HttpError(exists.length ? 403 : 404, exists.length ? 'You cannot modify this assignment' : 'Assignment not found');
     }
+    const [course] = await connection.execute('SELECT id FROM courses WHERE id=? AND teacher_id=?', [item.courseId, teacherId]);
+    if (!course.length) throw new HttpError(404, 'Course not found');
+
+    if (Number(owned[0].course_id) !== item.courseId) {
+      const [dependencies] = await connection.execute('SELECT COUNT(*) AS submissions FROM submissions WHERE assignment_id=?', [id]);
+      if (Number(dependencies[0].submissions)) {
+        throw new HttpError(409, 'Assignment has submissions and cannot be moved to another course');
+      }
+    }
+
+    const maxScore = item.maxScore ?? Number(owned[0].max_score);
+    if (maxScore < Number(owned[0].max_score)) {
+      const [grades] = await connection.execute('SELECT MAX(score) AS highest_score FROM submissions WHERE assignment_id=?', [id]);
+      if (grades[0].highest_score != null && Number(grades[0].highest_score) > maxScore) {
+        throw new HttpError(409, 'New maximum score is lower than an existing submission score');
+      }
+    }
+    const status = item.status ?? owned[0].status;
+    await connection.execute(
+      'UPDATE assignments SET course_id=?,title=?,description=?,due_at=?,max_score=?,status=? WHERE id=? AND created_by=?',
+      [item.courseId, item.title, item.description, item.dueAt, maxScore, status, id, teacherId],
+    );
+    await connection.commit();
+    return { id, course_id: item.courseId, title: item.title, description: item.description, due_at: item.dueAt, max_score: maxScore, status };
+  } catch (error) {
+    await connection.rollback().catch(() => {});
+    throw error;
+  } finally {
+    connection.release();
   }
-  await db.execute('UPDATE assignments SET course_id=?,title=?,description=?,due_at=?,max_score=?,status=? WHERE id=? AND created_by=?', [item.courseId, item.title, item.description, item.dueAt, maxScore, item.status, id, teacherId]);
-  return { id, course_id: item.courseId, title: item.title, description: item.description, due_at: item.dueAt, max_score: maxScore, status: item.status };
 }
 async function remove(teacherId, id) {
   const connection = await db.getConnection();
@@ -83,18 +108,4 @@ async function listSubmissions(teacherId, assignmentId) {
   );
   return rows;
 }
-async function markReviewed(teacherId, assignmentId, studentId) {
-  const [owned] = await db.execute('SELECT a.id FROM assignments a JOIN courses c ON c.id=a.course_id WHERE a.id=? AND a.created_by=? AND c.teacher_id=?', [assignmentId, teacherId, teacherId]);
-  if (!owned.length) {
-    const [exists] = await db.execute('SELECT id FROM assignments WHERE id=?', [assignmentId]);
-    throw new HttpError(exists.length ? 403 : 404, exists.length ? 'You cannot review submissions for this assignment' : 'Assignment not found');
-  }
-  const [result] = await db.execute("UPDATE submissions SET status='REVIEWED' WHERE assignment_id=? AND student_id=? AND status IN ('SUBMITTED','LATE')", [assignmentId, studentId]);
-  if (!result.affectedRows) {
-    const [existing] = await db.execute('SELECT status FROM submissions WHERE assignment_id=? AND student_id=?', [assignmentId, studentId]);
-    if (!existing.length) throw new HttpError(404, 'Submission not found');
-  }
-  return { assignment_id: assignmentId, student_id: studentId, status: 'REVIEWED' };
-}
-
-module.exports = { listPublic, listMine, getPublicById, create, update, remove, listSubmissions, markReviewed };
+module.exports = { listPublic, listMine, getPublicById, create, update, remove, listSubmissions };

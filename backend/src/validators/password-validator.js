@@ -1,7 +1,8 @@
 const HttpError = require('../utils/http-error');
+const { objectBody } = require('../utils/validation');
 
 function validatePasswordChangeBody(body = {}) {
-  body = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  body = objectBody(body, ['current_password', 'new_password'], 'password change');
   const currentPassword = body.current_password;
   const newPassword = body.new_password;
   if (typeof currentPassword !== 'string' || !currentPassword || Buffer.byteLength(currentPassword, 'utf8') > 255) {
