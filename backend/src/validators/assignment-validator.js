@@ -7,6 +7,9 @@ function validateAssignment(body) {
   const title = text(body.title, 'title', 200);
   const description = text(body.description, 'description', 65535, false);
   const dueAt = dateTime(body.due_at);
+  if (Date.parse(`${dueAt.replace(' ', 'T')}+07:00`) <= Date.now()) {
+    fail('due_at must be in the future');
+  }
   const status = body.status || 'DRAFT';
   if (!statuses.includes(status)) fail('Invalid assignment status');
   let maxScore;
@@ -27,17 +30,15 @@ function validateSubmissionParams(params) {
 function validateSubmissionReview(body = {}) {
   body = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
   const result = {};
-  if (Object.hasOwn(body, 'score')) {
-    if (body.score === null || body.score === '') result.score = null;
-    else {
-      const rawScore = String(body.score);
-      const score = Number(rawScore);
-      if (!/^\d+(?:\.\d{1,2})?$/.test(rawScore) || !Number.isFinite(score) || score > 999999.99) {
-        fail('Score must be a non-negative number with up to two decimal places');
-      }
-      result.score = score;
-    }
+  if (!Object.hasOwn(body, 'score') || body.score == null || body.score === '') {
+    fail('Score is required to mark submission as reviewed');
   }
+  const rawScore = String(body.score);
+  const score = Number(rawScore);
+  if (!/^\d+(?:\.\d{1,2})?$/.test(rawScore) || !Number.isFinite(score) || score > 999999.99) {
+    fail('Score must be a non-negative number with up to two decimal places');
+  }
+  result.score = score;
   if (Object.hasOwn(body, 'remarks')) result.remarks = text(body.remarks, 'remarks', 500, false);
   return result;
 }

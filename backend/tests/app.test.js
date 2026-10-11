@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { idParam, text, dateTime, pagination } = require('../src/utils/validation');
 const HttpError = require('../src/utils/http-error');
-const { validateAssignment } = require('../src/validators/assignment-validator');
+const { validateAssignment, validateSubmissionReview } = require('../src/validators/assignment-validator');
 const { validateLoginBody } = require('../src/validators/auth-validator');
 const { validateCourseBody } = require('../src/validators/course-validator');
 const { validateStudentRegisterBody, validateStudentLoginBody } = require('../src/validators/student-auth-validator');
@@ -24,8 +24,19 @@ test('validates bounded text and optional values', () => {
 });
 test('validates date and time inputs', () => {
   assert.equal(dateTime('2026-11-30T12:00'), '2026-11-30 12:00');
+  assert.equal(dateTime('2026-11-30T12:00:00Z'), '2026-11-30 19:00:00');
+  assert.equal(dateTime('2026-11-30T12:00:00+07:00'), '2026-11-30 12:00:00');
+  assert.equal(dateTime('2026-11-30T12:00:00-05:00'), '2026-12-01 00:00:00');
   assert.throws(() => dateTime('not-a-date'), HttpError);
   assert.throws(() => dateTime('2026-02-30T12:00'), HttpError);
+  assert.throws(() => dateTime('2026-11-30T12:00:00+15:00'), HttpError);
+});
+
+test('requires a score before marking a submission reviewed', () => {
+  assert.deepEqual(validateSubmissionReview({ score: '0', remarks: '' }), { score: 0, remarks: null });
+  assert.throws(() => validateSubmissionReview({}), HttpError);
+  assert.throws(() => validateSubmissionReview({ score: '' }), HttpError);
+  assert.throws(() => validateSubmissionReview({ score: null }), HttpError);
 });
 
 test('validates assignment course, status, title, and deadline', () => {

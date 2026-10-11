@@ -47,9 +47,11 @@ function readSavedSession() {
 
 function formatDate(value) {
   if (!value) return "ไม่ระบุกำหนดส่ง";
-  const date = new Date(value);
+  const hasTimezone = typeof value === "string" && /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
+  const normalized = typeof value === "string" ? value.replace(" ", "T") : value;
+  const date = new Date(hasTimezone ? normalized : `${normalized}+07:00`);
   if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" });
+  return date.toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Bangkok" });
 }
 
 function deadlineTimestamp(value) {
@@ -57,7 +59,8 @@ function deadlineTimestamp(value) {
   const normalized = typeof value === "string" && !value.includes("T")
     ? value.replace(" ", "T")
     : value;
-  return new Date(normalized).getTime();
+  const hasTimezone = typeof normalized === "string" && /(?:Z|[+-]\d{2}:\d{2})$/i.test(normalized);
+  return new Date(hasTimezone ? normalized : `${normalized}+07:00`).getTime();
 }
 
 function statusText(status) {

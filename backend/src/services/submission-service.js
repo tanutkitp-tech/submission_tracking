@@ -109,7 +109,7 @@ async function grade(teacherId, assignmentId, studentId, values) {
     [assignmentId, studentId],
   );
   if (!existing.length) throw new HttpError(404, 'Submission not found');
-  const score = Object.hasOwn(values, 'score') ? values.score : existing[0].score;
+  const score = values.score;
   if (score != null && Number(score) > Number(owned[0].max_score)) {
     throw new HttpError(400, `Score cannot exceed the assignment maximum of ${owned[0].max_score}`);
   }

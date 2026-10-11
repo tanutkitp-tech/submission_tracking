@@ -59,13 +59,13 @@
 | GET | `/api/assignments` | อาจารย์ | เฉพาะ `PUBLISHED`; มีข้อมูลรายวิชา ไม่มีข้อมูลนิสิต |
 | GET | `/api/assignments/mine` | อาจารย์ | งานทุกสถานะที่อาจารย์ปัจจุบันจัดการได้ รวม Draft/Closed |
 | GET | `/api/assignments/:id` | อาจารย์ | คืน 404 สำหรับ Draft/Closed |
-| POST | `/api/assignments` | อาจารย์เจ้าของรายวิชา | body `course_id`, `title`, `description`, `due_at` (ISO datetime), `max_score` (optional, default 100, positive, up to 2 decimals), `status` (`DRAFT`/`PUBLISHED`/`CLOSED`); `created_by` ใช้ token |
-| PUT | `/api/assignments/:id` | ผู้สร้าง/เจ้าของ | body เหมือน POST; ตรวจทั้งเจ้าของ assignment และรายวิชา; ถ้าไม่ส่ง `max_score` จะคงค่าเดิม |
+| POST | `/api/assignments` | อาจารย์เจ้าของรายวิชา | body `course_id`, `title`, `description`, `due_at` (ISO datetime; รองรับ `Z` และ UTC offset แล้วแปลงเป็นเวลา Asia/Bangkok; datetime-local ที่ไม่มี offset ถือเป็นเวลา Asia/Bangkok), `max_score` (optional, default 100, positive, up to 2 decimals), `status` (`DRAFT`/`PUBLISHED`/`CLOSED`); `created_by` ใช้ token |
+| PUT | `/api/assignments/:id` | ผู้สร้าง/เจ้าของ | body เหมือน POST; ตรวจทั้งเจ้าของ assignment และรายวิชา; ถ้าไม่ส่ง `max_score` จะคงค่าเดิม; submission เดิมยังปรากฏในรายชื่อหลังย้ายงานไปอีกรายวิชาภายใต้อาจารย์คนเดิม |
 | DELETE | `/api/assignments/:id` | ผู้สร้าง | 409 เมื่อ constraint ป้องกันการลบ |
 | GET | `/api/assignments/:id/submissions` | อาจารย์เจ้าของงาน | สถานะนิสิตที่ลงทะเบียนในรายวิชานั้น; `status` เป็น null หากยังไม่มี submission |
 | GET | `/api/assignments/:id/submissions/:studentId/file` | อาจารย์เจ้าของงาน | ดาวน์โหลดไฟล์ของนิสิตเป็น attachment; ใช้ token อาจารย์ |
 | GET | `/api/assignments/:id/submissions/:studentId/preview` | อาจารย์เจ้าของงาน | เปิดดู PDF/JPEG/PNG/GIF/WebP ที่ตรวจ signature แล้ว; รูปแบบอื่นตอบ 415 และยังดาวน์โหลดได้ |
-| PATCH | `/api/assignments/:id/submissions/:studentId` | อาจารย์เจ้าของงาน | บันทึก `score` (0 ถึงคะแนนเต็มของงาน, ทศนิยมไม่เกิน 2 ตำแหน่ง) และ `remarks` (ไม่เกิน 500 ตัวอักษร) พร้อมเปลี่ยนเป็น `REVIEWED` |
+| PATCH | `/api/assignments/:id/submissions/:studentId` | อาจารย์เจ้าของงาน | ต้องส่ง `score` (0 ถึงคะแนนเต็มของงาน, ทศนิยมไม่เกิน 2 ตำแหน่ง); `remarks` เลือกส่งได้ (ไม่เกิน 500 ตัวอักษร); คะแนนว่าง/ไม่มีคะแนนตอบ 400 และไม่เปลี่ยนสถานะเป็น `REVIEWED` |
 | GET | `/api/student/courses` | นิสิต | ดูรายวิชาและสถานะการลงทะเบียนของบัญชีตนเอง |
 | POST | `/api/student/enrollments` | นิสิต | body `{ "course_id": 1 }`; ส่งคำขอ enrollment สถานะ `PENDING`; ส่งซ้ำขณะรอหรือหลังอนุมัติตอบ 409; คำขอที่ปฏิเสธแล้วส่งใหม่ได้ |
 | GET | `/api/student/assignments` | นิสิต | งาน `PUBLISHED` เฉพาะรายวิชาที่อาจารย์อนุมัติแล้ว พร้อมสถานะ submission ของตนเอง |

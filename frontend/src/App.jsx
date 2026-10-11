@@ -84,6 +84,8 @@ function friendlyError(error, context = "") {
       "Invalid description": "กรุณาตรวจสอบรายละเอียด",
       "Invalid title": "กรุณากรอกชื่องาน",
       "due_at must be a valid ISO date and time": "กรุณาระบุวันและเวลาที่ถูกต้อง",
+      "due_at must be in the future": "กำหนดส่งต้องเป็นวันและเวลาในอนาคต",
+      "Score is required to mark submission as reviewed": "กรุณากรอกคะแนนก่อนบันทึกผลตรวจ",
       "Invalid assignment status": "กรุณาเลือกสถานะงานที่ถูกต้อง",
       "max_score must be a positive number with up to two decimal places": "คะแนนเต็มต้องมากกว่า 0 และมีทศนิยมไม่เกิน 2 ตำแหน่ง",
     };
@@ -98,17 +100,51 @@ function friendlyError(error, context = "") {
 
 function formatDate(value) {
   if (!value) return "ไม่ระบุกำหนดส่ง";
-  const parsed = new Date(value);
+  const hasTimezone = typeof value === "string" && /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
+  const normalized = typeof value === "string" ? value.replace(" ", "T") : value;
+  const parsed = new Date(hasTimezone ? normalized : `${normalized}+07:00`);
   if (Number.isNaN(parsed.getTime())) return String(value);
   return parsed.toLocaleString("th-TH", {
     dateStyle: "medium",
     timeStyle: "short",
+    timeZone: "Asia/Bangkok",
   });
 }
 
 function dateTimeInputValue(value) {
   if (!value) return "";
-  return String(value).replace(" ", "T").slice(0, 16);
+  const text = String(value);
+  if (/(?:Z|[+-]\d{2}:\d{2})$/i.test(text)) {
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) return "";
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    }).formatToParts(date).reduce((result, part) => {
+      if (part.type !== "literal") result[part.type] = part.value;
+      return result;
+    }, {});
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+  }
+  return text.replace(" ", "T").slice(0, 16);
+}
+
+function minimumDueAtValue(now) {
+  const nextMinute = new Date(Math.floor(now / 60_000 + 1) * 60_000);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(nextMinute).reduce((result, part) => {
+    if (part.type !== "literal") result[part.type] = part.value;
+    return result;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
+function isFutureBangkokDateTime(value, now) {
+  if (!value) return false;
+  const normalized = value.length === 16 ? `${value}:00` : value;
+  return Date.parse(`${normalized}+07:00`) > now;
 }
 
 function statusLabel(status) {
@@ -278,6 +314,7 @@ function SystemHealth() {
 }
 
 function App() {
+  const [currentTimestamp, setCurrentTimestamp] = useState(() => Date.now());
   const [initialSession] = useState(readSavedSession);
   const [token, setToken] = useState(() => initialSession?.token || "");
   const [teacher, setTeacher] = useState(() => initialSession?.teacher || null);
@@ -339,6 +376,11 @@ function App() {
   const [enrollmentsError, setEnrollmentsError] = useState("");
   const [enrollmentRefresh, setEnrollmentRefresh] = useState(0);
   const [enrollmentFilter, setEnrollmentFilter] = useState("PENDING");
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setCurrentTimestamp(Date.now()), 10_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   const clearSession = useCallback((expired = false) => {
     localStorage.removeItem(STORAGE_KEY);
@@ -625,6 +667,10 @@ function App() {
 
   async function saveAssignment(event) {
     event.preventDefault();
+    if (!isFutureBangkokDateTime(assignmentForm.due_at, Date.now())) {
+      setAssignmentFormError("กำหนดส่งต้องเป็นวันและเวลาในอนาคต");
+      return;
+    }
     setBusyAction("assignment-save");
     setAssignmentFormError("");
     try {
@@ -1365,7 +1411,25 @@ function App() {
               <div className="form-row">
                 <label className="field">
                   <span>กำหนดส่ง</span>
-                  <input type="datetime-local" required value={assignmentForm.due_at} onChange={(event) => setAssignmentForm((form) => ({ ...form, due_at: event.target.value }))} />
+                  <input
+                    type="datetime-local"
+                    required
+                    min={minimumDueAtValue(currentTimestamp)}
+                    value={assignmentForm.due_at}
+                    onInvalid={(event) => {
+                      event.currentTarget.setCustomValidity("กำหนดส่งต้องเป็นวันและเวลาในอนาคต");
+                      setAssignmentFormError("กำหนดส่งต้องเป็นวันและเวลาในอนาคต");
+                    }}
+                    onChange={(event) => {
+                      event.currentTarget.setCustomValidity("");
+                      const dueAt = event.target.value;
+                      setAssignmentForm((form) => ({ ...form, due_at: dueAt }));
+                      setAssignmentFormError(isFutureBangkokDateTime(dueAt, Date.now())
+                        ? ""
+                        : "กำหนดส่งต้องเป็นวันและเวลาในอนาคต");
+                    }}
+                  />
+                  <small>เลือกวันและเวลาตั้งแต่นาทีถัดไปเป็นต้นไป</small>
                 </label>
                 <label className="field">
                   <span>สถานะ</span>

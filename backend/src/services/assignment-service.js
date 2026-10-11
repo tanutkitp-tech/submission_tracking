@@ -66,7 +66,21 @@ async function listSubmissions(teacherId, assignmentId) {
     const [exists] = await db.execute('SELECT id FROM assignments WHERE id=?', [assignmentId]);
     throw new HttpError(exists.length ? 403 : 404, exists.length ? 'You cannot view submissions for this assignment' : 'Assignment not found');
   }
-  const [rows] = await db.execute("SELECT s.id AS student_id,s.student_code,s.full_name,sub.status,sub.submitted_at,sub.remarks,sub.file_original_name,sub.file_mime_type,sub.file_size,sub.score FROM enrollments e JOIN students s ON s.id=e.student_id JOIN assignments a ON a.course_id=e.course_id LEFT JOIN submissions sub ON sub.assignment_id=a.id AND sub.student_id=s.id WHERE a.id=? AND e.enrollment_status='APPROVED' ORDER BY s.student_code", [assignmentId]);
+  const [rows] = await db.execute(
+    `SELECT s.id AS student_id,s.student_code,s.full_name,sub.status,sub.submitted_at,sub.remarks,sub.file_original_name,sub.file_mime_type,sub.file_size,sub.score
+     FROM assignments a
+     JOIN enrollments e ON e.course_id = a.course_id AND e.enrollment_status = 'APPROVED'
+     JOIN students s ON s.id = e.student_id
+     LEFT JOIN submissions sub ON sub.assignment_id = a.id AND sub.student_id = s.id
+     WHERE a.id = ?
+     UNION
+     SELECT s.id AS student_id,s.student_code,s.full_name,sub.status,sub.submitted_at,sub.remarks,sub.file_original_name,sub.file_mime_type,sub.file_size,sub.score
+     FROM submissions sub
+     JOIN students s ON s.id = sub.student_id
+     WHERE sub.assignment_id = ?
+     ORDER BY student_code`,
+    [assignmentId, assignmentId],
+  );
   return rows;
 }
 async function markReviewed(teacherId, assignmentId, studentId) {

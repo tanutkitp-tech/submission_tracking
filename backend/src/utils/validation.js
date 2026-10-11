@@ -10,12 +10,36 @@ function text(value, name, max, required = true) {
   return value.trim() || null;
 }
 function dateTime(value) {
-  const match = typeof value === 'string' && value.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/);
+  const match = typeof value === 'string' && value.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:\d{2})?$/i);
   if (!match) fail('due_at must be a valid ISO date and time');
-  const [, year, month, day, hour, minute, second = '0'] = match;
+  const [, year, month, day, hour, minute, secondValue, , zone] = match;
+  const second = secondValue || '0';
   const parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
-  if (parsed.getUTCFullYear() !== Number(year) || parsed.getUTCMonth() !== Number(month) - 1 || parsed.getUTCDate() !== Number(day) || Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59) fail('due_at must be a valid ISO date and time');
-  return value.replace('T', ' ');
+  if (Number(year) < 100 || parsed.getUTCFullYear() !== Number(year) || parsed.getUTCMonth() !== Number(month) - 1 || parsed.getUTCDate() !== Number(day) || Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59) fail('due_at must be a valid ISO date and time');
+
+  // DATETIME and CURRENT_TIMESTAMP in this project use the Bangkok wall clock.
+  // Convert explicitly zoned inputs (including the common Z suffix) to that zone.
+  if (zone) {
+    if (zone.toUpperCase() !== 'Z') {
+      const [, offsetHour, offsetMinute] = zone.match(/^[+-](\d{2}):(\d{2})$/) || [];
+      if (Number(offsetHour) > 14 || Number(offsetMinute) > 59 || (Number(offsetHour) === 14 && Number(offsetMinute) !== 0)) {
+        fail('due_at must be a valid ISO date and time');
+      }
+    }
+    const normalized = value.replace(' ', 'T');
+    const instant = new Date(normalized);
+    if (Number.isNaN(instant.getTime())) fail('due_at must be a valid ISO date and time');
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    }).formatToParts(instant).reduce((result, part) => {
+      if (part.type !== 'literal') result[part.type] = part.value;
+      return result;
+    }, {});
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+  }
+
+  return `${year}-${month}-${day} ${hour}:${minute}${secondValue ? `:${second.padStart(2, '0')}` : ''}`;
 }
 function pagination(query = {}) {
   const page = query.page === undefined ? 1 : Number(query.page);
