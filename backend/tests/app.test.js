@@ -63,7 +63,115 @@ test('validates assignment course, status, title, and deadline', () => {
   assert.throws(() => validateAssignment({ course_id: 2, title: 'Lab', due_at: dueAt, status: 'OPEN' }), HttpError);
   assert.throws(() => validateAssignment({ course_id: 2, title: 'Lab', due_at: dueAt, made_up: true }), HttpError);
   assert.throws(() => validateAssignment({ course_id: 2, title: 'Lab', due_at: new Date(Date.now() - 60_000).toISOString() }), HttpError);
+  const overdueDueAt = '2020-01-02T12:30';
+  assert.equal(
+    validateAssignment({ course_id: 2, title: 'Edited lab', due_at: overdueDueAt, status: 'CLOSED' }, { isUpdate: true }).dueAt,
+    '2020-01-02 12:30',
+  );
   assert.throws(() => validateAssignment(null), HttpError);
+});
+
+test('allows closing an overdue assignment without changing its deadline', async () => {
+  const db = require('../src/config/database');
+  const assignmentService = require('../src/services/assignment-service');
+  const originalGetConnection = db.getConnection;
+  let updateParameters;
+  let committed = false;
+  const connection = {
+    beginTransaction: async () => {},
+    commit: async () => { committed = true; },
+    rollback: async () => {},
+    release: () => {},
+    execute: async (sql, parameters) => {
+      if (sql.startsWith('SELECT a.id,a.course_id,a.max_score,a.status')) {
+        return [[{ id: 9, course_id: 2, max_score: 100, status: 'PUBLISHED' }]];
+      }
+      if (sql.startsWith('SELECT id FROM courses')) return [[{ id: parameters[0] }]];
+      if (sql.startsWith('UPDATE assignments')) {
+        updateParameters = parameters;
+        return [{ affectedRows: 1 }];
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+  db.getConnection = async () => connection;
+  try {
+    const item = validateAssignment({
+      course_id: 2,
+      title: 'Closed overdue lab',
+      due_at: '2020-01-02T12:30',
+      max_score: 120,
+      status: 'CLOSED',
+    }, { isUpdate: true });
+    const result = await assignmentService.update(4, 9, item);
+    assert.equal(result.title, 'Closed overdue lab');
+    assert.equal(result.due_at, '2020-01-02 12:30');
+    assert.equal(result.max_score, 120);
+    assert.equal(result.status, 'CLOSED');
+    assert.equal(updateParameters[3], '2020-01-02 12:30');
+    assert.equal(updateParameters[5], 'CLOSED');
+    assert.equal(committed, true);
+  } finally {
+    db.getConnection = originalGetConnection;
+  }
+});
+
+test('shows overdue published assignments to students but excludes closed assignments', async () => {
+  const db = require('../src/config/database');
+  const studentService = require('../src/services/student-service');
+  const originalExecute = db.execute;
+  let assignmentQuery;
+  const overduePublished = { id: 12, due_at: '2020-01-02 12:30:00', assignment_status: 'PUBLISHED' };
+  db.execute = async (sql) => {
+    assignmentQuery = sql;
+    return [[overduePublished]];
+  };
+  try {
+    const rows = await studentService.listAssignments(6);
+    assert.deepEqual(rows, [overduePublished]);
+    assert.match(assignmentQuery, /a\.status\s*=\s*'PUBLISHED'/);
+    assert.doesNotMatch(assignmentQuery, /due_at\s*>\s*CURRENT_TIMESTAMP/i);
+  } finally {
+    db.execute = originalExecute;
+  }
+});
+
+test('rejects file submissions after deadline and removes the staged file', async () => {
+  const db = require('../src/config/database');
+  const submissionService = require('../src/services/submission-service');
+  const files = require('../src/services/submission-files');
+  const originalGetConnection = db.getConnection;
+  const originalStore = files.store;
+  const originalRemove = files.remove;
+  let rolledBack = false;
+  let eligibilityQuery;
+  const removedKeys = [];
+  const connection = {
+    beginTransaction: async () => {},
+    commit: async () => {},
+    rollback: async () => { rolledBack = true; },
+    release: () => {},
+    execute: async (sql) => {
+      eligibilityQuery = sql;
+      return [[{ id: 12, due_at: '2020-01-02 12:30:00', deadline_passed: 1 }]];
+    },
+  };
+  db.getConnection = async () => connection;
+  files.store = async () => 'temporary-test-key';
+  files.remove = async (key) => { removedKeys.push(key); };
+  try {
+    await assert.rejects(
+      submissionService.submit(6, 12, { originalname: 'test.txt', buffer: Buffer.from('test'), mimetype: 'text/plain', size: 4 }),
+      (error) => error.status === 409 && error.message === 'Submission deadline has passed',
+    );
+    assert.match(eligibilityQuery, /a\.due_at\s*<=\s*CURRENT_TIMESTAMP/i);
+    assert.equal(rolledBack, true);
+    assert.deepEqual(removedKeys, ['temporary-test-key']);
+  } finally {
+    db.getConnection = originalGetConnection;
+    files.store = originalStore;
+    files.remove = originalRemove;
+  }
 });
 
 test('preserves assignment status on PUT when omitted', async () => {

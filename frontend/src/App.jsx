@@ -670,14 +670,20 @@ function App() {
 
   async function saveAssignment(event) {
     event.preventDefault();
-    if (!isFutureBangkokDateTime(assignmentForm.due_at, Date.now())) {
+    if (!assignmentEditing && !isFutureBangkokDateTime(assignmentForm.due_at, Date.now())) {
       setAssignmentFormError("กำหนดส่งต้องเป็นวันและเวลาในอนาคต");
       return;
     }
+    const editing = Boolean(assignmentEditing);
+    const originalDueAt = assignmentEditing?.due_at;
+    const deadlineUnchanged = originalDueAt
+      && assignmentForm.due_at === dateTimeInputValue(originalDueAt);
+    const dueAt = deadlineUnchanged
+      ? String(originalDueAt).replace(" ", "T")
+      : assignmentForm.due_at;
     setBusyAction("assignment-save");
     setAssignmentFormError("");
     try {
-      const editing = Boolean(assignmentEditing);
       await apiRequest(editing ? "/assignments/" + assignmentEditing.id : "/assignments", {
         method: editing ? "PUT" : "POST",
         token,
@@ -686,7 +692,7 @@ function App() {
           course_id: Number(assignmentForm.course_id),
           title: assignmentForm.title,
           description: assignmentForm.description,
-          due_at: assignmentForm.due_at,
+          due_at: dueAt,
           max_score: Number(assignmentForm.max_score),
           status: assignmentForm.status,
         }),
@@ -1417,22 +1423,23 @@ function App() {
                   <input
                     type="datetime-local"
                     required
-                    min={minimumDueAtValue(currentTimestamp)}
+                    min={!assignmentEditing ? minimumDueAtValue(currentTimestamp) : undefined}
                     value={assignmentForm.due_at}
                     onInvalid={(event) => {
-                      event.currentTarget.setCustomValidity("กำหนดส่งต้องเป็นวันและเวลาในอนาคต");
-                      setAssignmentFormError("กำหนดส่งต้องเป็นวันและเวลาในอนาคต");
+                      const message = assignmentEditing ? "" : "กำหนดส่งต้องเป็นวันและเวลาในอนาคต";
+                      event.currentTarget.setCustomValidity(message);
+                      if (message) setAssignmentFormError(message);
                     }}
                     onChange={(event) => {
                       event.currentTarget.setCustomValidity("");
                       const dueAt = event.target.value;
                       setAssignmentForm((form) => ({ ...form, due_at: dueAt }));
-                      setAssignmentFormError(isFutureBangkokDateTime(dueAt, Date.now())
+                      setAssignmentFormError(assignmentEditing || isFutureBangkokDateTime(dueAt, Date.now())
                         ? ""
                         : "กำหนดส่งต้องเป็นวันและเวลาในอนาคต");
                     }}
                   />
-                  <small>เลือกวันและเวลาตั้งแต่นาทีถัดไปเป็นต้นไป</small>
+                  <small>{assignmentEditing ? "แก้ไขงานที่เลยกำหนดได้ โดยคงกำหนดส่งเดิมไว้" : "เลือกวันและเวลาตั้งแต่นาทีถัดไปเป็นต้นไป"}</small>
                 </label>
                 <label className="field">
                   <span>สถานะ</span>

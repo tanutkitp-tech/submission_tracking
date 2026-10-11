@@ -8,7 +8,7 @@ function validateAssignment(body, { isUpdate = false } = {}) {
   const title = text(body.title, 'title', 200);
   const description = text(body.description, 'description', 65535, false, 65535);
   const dueAt = dateTime(body.due_at);
-  if (Date.parse(`${dueAt.replace(' ', 'T')}+07:00`) <= Date.now()) {
+  if (!isUpdate && Date.parse(`${dueAt.replace(' ', 'T')}+07:00`) <= Date.now()) {
     fail('due_at must be in the future');
   }
   const status = Object.hasOwn(body, 'status')

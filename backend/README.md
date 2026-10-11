@@ -60,7 +60,7 @@
 | GET | `/api/assignments/mine` | อาจารย์ | งานทุกสถานะที่อาจารย์ปัจจุบันจัดการได้ รวม Draft/Closed |
 | GET | `/api/assignments/:id` | อาจารย์ | คืน 404 สำหรับ Draft/Closed |
 | POST | `/api/assignments` | อาจารย์เจ้าของรายวิชา | body รับเฉพาะ `course_id`, `title`, `description`, `due_at`, `max_score`, `status`; `description` optional; `due_at` ต้องเป็น ISO datetime ในอนาคต รับ `Z` หรือ UTC offset แล้วแปลงเป็นเวลา Asia/Bangkok; datetime-local ที่ไม่มี offset ถือเป็นเวลา Asia/Bangkok; `max_score` optional (default 100, positive, up to 2 decimals); `status` optional (default `DRAFT`, รับ `DRAFT`/`PUBLISHED`/`CLOSED`); `created_by` ใช้ token |
-| PUT | `/api/assignments/:id` | ผู้สร้าง/เจ้าของ | body รับเฉพาะ fields เดียวกับ POST; ตรวจทั้งเจ้าของ assignment และรายวิชา; ถ้าไม่ส่ง `max_score` หรือ `status` จะคงค่าเดิม; ย้ายไปรายวิชาอื่นไม่ได้เมื่อมี submission และตอบ 409; งานที่ยังไม่มี submission ย้ายได้เฉพาะรายวิชาที่อาจารย์เป็นเจ้าของ |
+| PUT | `/api/assignments/:id` | ผู้สร้าง/เจ้าของ | body รับเฉพาะ fields เดียวกับ POST; งานเดิมแก้ไขได้แม้ `due_at` ผ่านไปแล้ว; ตรวจทั้งเจ้าของ assignment และรายวิชา; ถ้าไม่ส่ง `max_score` หรือ `status` จะคงค่าเดิม; ย้ายไปรายวิชาอื่นไม่ได้เมื่อมี submission และตอบ 409; งานที่ยังไม่มี submission ย้ายได้เฉพาะรายวิชาที่อาจารย์เป็นเจ้าของ |
 | DELETE | `/api/assignments/:id` | ผู้สร้าง | 409 เมื่อ constraint ป้องกันการลบ |
 | GET | `/api/assignments/:id/submissions` | อาจารย์เจ้าของงาน | สถานะนิสิตที่ลงทะเบียนในรายวิชานั้น; `status` เป็น null หากยังไม่มี submission |
 | GET | `/api/assignments/:id/submissions/:studentId/file` | อาจารย์เจ้าของงาน | ดาวน์โหลดไฟล์ของนิสิตเป็น attachment; ใช้ token อาจารย์ |
