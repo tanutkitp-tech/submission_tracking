@@ -1,16 +1,21 @@
-# React + Vite
+# Frontend ระบบติดตามสถานะการส่งงาน
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+## ตั้งค่าและเปิดใช้งาน
 
-Currently, two official plugins are available:
+ติดตั้ง dependencies แล้วเปิดหน้าเว็บสำหรับพัฒนา:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```powershell
+npm install
+npm run dev
+```
 
-## React Compiler
+เว็บใช้พอร์ต `5173` และเรียก API ที่ `http://localhost:3000/api` เป็นค่าเริ่มต้น หาก Backend ใช้ URL อื่น ให้กำหนด `VITE_API_BASE_URL` ก่อนเปิดหรือสร้าง production build
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## ตรวจสอบและสร้างไฟล์สำหรับเผยแพร่
 
-## Expanding the Oxlint configuration
+```powershell
+npm run lint
+npm run build
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+ไฟล์สำหรับเผยแพร่จะอยู่ใน `dist/`; ตั้งค่าเว็บเซิร์ฟเวอร์ให้ส่ง `index.html` สำหรับเส้นทางที่เว็บใช้

@@ -9,12 +9,14 @@ const required = {
   enrollments: ['id', 'course_id', 'student_id', 'enrollment_status', 'enrolled_at', 'reviewed_at'],
   assignments: ['id', 'course_id', 'title', 'description', 'due_at', 'max_score', 'status', 'created_by'],
   submissions: ['id', 'assignment_id', 'student_id', 'status', 'submitted_at', 'remarks', 'file_storage_key', 'file_original_name', 'file_mime_type', 'file_size', 'score'],
+  auth_rate_limit_buckets: ['bucket_key', 'attempt_count', 'reset_at'],
+  teacher_signup_invites: ['id', 'code_hash', 'expires_at', 'used_at', 'created_at'],
 };
 
 async function main() {
   const names = Object.keys(required);
   const [rows] = await db.execute(
-    'SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN (?, ?, ?, ?, ?, ?)', names,
+    `SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN (${names.map(() => '?').join(', ')})`, names,
   );
   const actual = new Map();
   for (const row of rows) {

@@ -14,7 +14,8 @@ before(async () => {
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.equal(body.success, true);
-  assert.equal(body.data.database, process.env.DB_NAME || 'assignment_tracking');
+  assert.equal(body.data.connected, true);
+  assert.equal(Object.hasOwn(body.data, 'database'), false);
 });
 
 test('serves public course list but requires authentication to read assignments', async () => {

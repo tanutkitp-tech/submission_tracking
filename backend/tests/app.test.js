@@ -2,8 +2,9 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { idParam, text, dateTime, pagination } = require('../src/utils/validation');
 const HttpError = require('../src/utils/http-error');
+const { createRateLimiter } = require('../src/middleware/rate-limit');
 const { validateAssignment, validateSubmissionReview } = require('../src/validators/assignment-validator');
-const { validateLoginBody } = require('../src/validators/auth-validator');
+const { validateLoginBody, validateTeacherRegisterBody } = require('../src/validators/auth-validator');
 const { validateCourseBody } = require('../src/validators/course-validator');
 const { validateStudentRegisterBody, validateStudentLoginBody } = require('../src/validators/student-auth-validator');
 const { validatePasswordChangeBody } = require('../src/validators/password-validator');
@@ -19,6 +20,47 @@ test('validates positive integer identifiers', () => {
   assert.throws(() => idParam('9007199254740992'), HttpError);
   assert.throws(() => idParam('1; DROP TABLE courses'), HttpError);
   assert.throws(() => idParam(['1']), HttpError);
+});
+test('limits repeated requests for the same account without combining users on a shared IP', async () => {
+  const counts = new Map();
+  const store = {
+    async consume(scope, clientIp, windowMs) {
+      assert.equal(scope, 'teacher-login');
+      const count = (counts.get(clientIp) || 0) + 1;
+      counts.set(clientIp, count);
+      return { count, resetAt: Date.now() + windowMs };
+    },
+  };
+  const limit = createRateLimiter({
+    windowMs: 60_000,
+    max: 2,
+    scope: 'teacher-login',
+    store,
+    keyGenerator: (req, clientIp) => `${clientIp}\0${req.body.email.toLowerCase()}`,
+  });
+  const req = (email) => ({ ip: '192.0.2.10', body: { email } });
+  let nextCalls = 0;
+  const response = () => ({
+    headers: {},
+    statusCode: 200,
+    body: null,
+    setHeader(name, value) { this.headers[name] = value; },
+    status(code) { this.statusCode = code; return this; },
+    json(body) { this.body = body; return this; },
+  });
+  const first = response();
+  const second = response();
+  const third = response();
+  await limit(req('teacher@example.com'), first, () => { nextCalls += 1; });
+  await limit(req('teacher@example.com'), second, () => { nextCalls += 1; });
+  await limit(req('teacher@example.com'), third, () => { nextCalls += 1; });
+  const otherUser = response();
+  await limit(req('another@example.com'), otherUser, () => { nextCalls += 1; });
+  assert.equal(nextCalls, 3);
+  assert.equal(third.statusCode, 429);
+  assert.equal(otherUser.statusCode, 200);
+  assert.equal(third.body.success, false);
+  assert.ok(Number(third.headers['Retry-After']) > 0);
 });
 test('validates bounded text and optional values', () => {
   assert.equal(text('  Intro  ', 'title', 20), 'Intro');
@@ -256,6 +298,14 @@ test('limits inline file previews to signatures of supported file formats', () =
 test('validates auth and course request bodies', () => {
   assert.deepEqual(validateLoginBody({ email: ' Teacher@Example.com ', password: 'secret' }), { email: 'teacher@example.com', password: 'secret' });
   assert.throws(() => validateLoginBody({ email: 'bad', password: 'x' }), HttpError);
+  assert.throws(() => validateLoginBody({ email: 'teacher@example.com', password: 'x'.repeat(73) }), HttpError);
+  assert.deepEqual(validateTeacherRegisterBody({ full_name: ' Teacher Example ', email: ' Teacher@Example.test ', password: 'teacher-pass-123' }), {
+    fullName: 'Teacher Example', email: 'teacher@example.test', password: 'teacher-pass-123', inviteCode: '',
+  });
+  assert.equal(validateTeacherRegisterBody({ full_name: 'Teacher Example', email: 'teacher@domain.c', password: 'teacher-pass-123' }).email, 'teacher@domain.c');
+  assert.throws(() => validateTeacherRegisterBody({ full_name: 'Teacher Example', email: 'teacher@example', password: 'teacher-pass-123' }), HttpError);
+  assert.throws(() => validateTeacherRegisterBody({ full_name: 'Teacher Example', email: 'teacher@example..test', password: 'teacher-pass-123' }), HttpError);
+  assert.throws(() => validateTeacherRegisterBody({ full_name: 'Teacher Example', email: 'teacher@example.test', password: 'short' }), HttpError);
   assert.deepEqual(validateCourseBody({ course_code: ' cs101 ', course_name: 'Intro' }), { courseCode: 'CS101', courseName: 'Intro', description: null });
   assert.throws(() => validateCourseBody(null), HttpError);
 });
@@ -269,6 +319,54 @@ test('validates student registration and login credentials', () => {
   });
   assert.throws(() => validateStudentRegisterBody({ student_code: '66001', full_name: 'Student', password: 'short' }), HttpError);
   assert.throws(() => validateStudentRegisterBody({ student_code: '66001', full_name: 'Student', password: 'x'.repeat(73) }), HttpError);
+});
+
+test('consumes a one-time teacher invitation together with account creation', async () => {
+  const authService = require('../src/services/auth-service');
+  const db = require('../src/config/database');
+  const passwordService = require('../src/services/password-service');
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalJwtSecret = process.env.JWT_SECRET;
+  const originalGetConnection = db.getConnection;
+  const originalHashPassword = passwordService.hashPassword;
+  process.env.NODE_ENV = 'production';
+  process.env.JWT_SECRET = 'test-signing-secret';
+  passwordService.hashPassword = async () => 'password-hash';
+  let committed = false;
+  let rolledBack = false;
+  const statements = [];
+  db.getConnection = async () => ({
+    beginTransaction: async () => {},
+    commit: async () => { committed = true; },
+    rollback: async () => { rolledBack = true; },
+    release: () => {},
+    execute: async (sql) => {
+      statements.push(sql);
+      if (sql.startsWith('SELECT id, expires_at')) {
+        return [[{ id: 3, expiresAt: Date.now() + 60_000, usedAt: null }]];
+      }
+      if (sql.startsWith('UPDATE teacher_signup_invites')) return [{ affectedRows: 1 }];
+      if (sql.startsWith('INSERT INTO teachers')) return [{ insertId: 19 }];
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  });
+  try {
+    const account = await authService.register({
+      fullName: 'Teacher Example', email: 'teacher@example.test', password: 'teacher-pass-123', inviteCode: 'one-time-code',
+    });
+    assert.equal(account.teacher.id, 19);
+    assert.equal(committed, true);
+    assert.equal(rolledBack, false);
+    assert.ok(statements.some((sql) => sql.startsWith('UPDATE teacher_signup_invites')));
+    assert.ok(statements.some((sql) => sql.startsWith('INSERT INTO teachers')));
+  } finally {
+    if (originalNodeEnv == null) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalNodeEnv;
+    if (originalJwtSecret == null) delete process.env.JWT_SECRET;
+    else process.env.JWT_SECRET = originalJwtSecret;
+    db.getConnection = originalGetConnection;
+    passwordService.hashPassword = originalHashPassword;
+  }
 });
 
 test('validates enrollment requests and teacher decisions', () => {

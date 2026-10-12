@@ -14,6 +14,8 @@
     "migrate:enrollment-approval": "node scripts/migrate-enrollment-approval.js",
     "migrate:submission-files": "node scripts/migrate-submission-files.js",
     "migrate:assignment-max-score": "node scripts/migrate-assignment-max-score.js",
+    "migrate:production-security": "node scripts/migrate-production-security.js",
+    "invite:teacher": "node scripts/create-teacher-invite.js",
     "seed:teacher": "node scripts/create-teacher.js"
   },
   "keywords": [],

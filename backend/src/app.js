@@ -10,6 +10,11 @@ const { isAllowedOrigin } = require('./utils/cors-origin');
 
 const app = express();
 const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173').split(',').map((item) => item.trim()).filter(Boolean);
+const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS || 0);
+if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0 || trustProxyHops > 10) {
+  throw new Error('TRUST_PROXY_HOPS must be an integer between 0 and 10');
+}
+app.set('trust proxy', trustProxyHops);
 app.disable('x-powered-by');
 app.use(cors({
   origin(origin, callback) {
@@ -20,8 +25,8 @@ app.use(cors({
 app.use(express.json({ limit: '1mb' }));
 app.get('/api/health', (req, res) => res.json({ success: true, message: 'API is running' }));
 app.get('/api/health/db', async (req, res) => {
-  const [rows] = await db.execute('SELECT DATABASE() AS databaseName, 1 AS connected');
-  res.json({ success: true, message: 'Database connection successful', data: { database: rows[0].databaseName, connected: Boolean(rows[0].connected) } });
+  const [rows] = await db.execute('SELECT 1 AS connected');
+  res.json({ success: true, message: 'Database connection successful', data: { connected: Boolean(rows[0].connected) } });
 });
 app.use('/api/auth', authRoutes);
 app.use('/api/courses', courseRoutes);

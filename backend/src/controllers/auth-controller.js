@@ -1,6 +1,12 @@
 const authService = require('../services/auth-service');
-const { validateLoginBody } = require('../validators/auth-validator');
+const { validateLoginBody, validateTeacherRegisterBody } = require('../validators/auth-validator');
 const { validatePasswordChangeBody } = require('../validators/password-validator');
+
+async function register(req, res) {
+  const account = validateTeacherRegisterBody(req.body);
+  const data = await authService.register(account);
+  res.status(201).json({ success: true, message: 'Teacher account created', data });
+}
 
 async function login(req, res) {
   const credentials = validateLoginBody(req.body);
@@ -19,4 +25,4 @@ async function changePassword(req, res) {
   res.json({ success: true, message: 'Password updated', data });
 }
 
-module.exports = { login, me, changePassword };
+module.exports = { register, login, me, changePassword };

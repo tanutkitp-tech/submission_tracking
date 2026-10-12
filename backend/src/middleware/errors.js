@@ -8,6 +8,7 @@ function errorHandler(err, req, res, next) {
   if (err.code === 'LIMIT_FILE_SIZE') { status = 413; message = 'File exceeds the 25 MB upload limit'; }
   if (err.name === 'MulterError' && err.code !== 'LIMIT_FILE_SIZE') { status = 400; message = 'Invalid upload request'; }
   if (err.type === 'entity.parse.failed' || err instanceof SyntaxError) { status = 400; message = 'Invalid JSON body'; }
+  if (status === 429) message = 'Too many requests. Please try again later.';
   if (err.message === 'Origin is not allowed by CORS') { status = 403; message = 'Origin is not allowed'; }
   if (err.code === 'ER_DUP_ENTRY') { status = 409; message = 'A record with the same unique value already exists'; }
   if (['ER_ROW_IS_REFERENCED_2', 'ER_NO_REFERENCED_ROW_2'].includes(err.code)) { status = 409; message = 'Related records prevent this operation'; }

@@ -21,14 +21,14 @@ async function apiRequest(path, { token, ...options } = {}) {
   try {
     response = await fetch(API_BASE_URL + path, { ...options, headers });
   } catch {
-    throw new StudentApiError("เชื่อมต่อ Backend ไม่ได้ ตรวจสอบว่า Backend ทำงานที่ http://localhost:3000");
+    throw new StudentApiError("ไม่สามารถเชื่อมต่อระบบได้ กรุณาลองใหม่อีกครั้ง");
   }
 
   let payload;
   try {
     payload = await response.json();
   } catch {
-    throw new StudentApiError("Backend ส่งข้อมูลกลับมาในรูปแบบที่อ่านไม่ได้", response.status);
+    throw new StudentApiError("ระบบตอบกลับไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง", response.status);
   }
   if (!response.ok || payload?.success !== true) {
     throw new StudentApiError(payload?.message || "คำขอไม่สำเร็จ กรุณาลองใหม่", response.status);
@@ -64,11 +64,27 @@ function deadlineTimestamp(value) {
 }
 
 function statusText(status) {
-  return ({
+  const labels = {
     SUBMITTED: "ส่งแล้ว",
     LATE: "ส่งล่าช้า",
     REVIEWED: "ตรวจแล้ว",
-  })[status] || "ยังไม่มี submission";
+  };
+  return labels[status] || (status ? "ไม่ทราบสถานะ" : "ยังไม่ได้ส่งงาน");
+}
+
+function studentFriendlyError(error) {
+  const status = Number(error?.status) || 0;
+  if (status === 400) return "ข้อมูลที่กรอกไม่ถูกต้อง กรุณาตรวจสอบแล้วลองใหม่";
+  if (status === 401) return "เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่";
+  if (status === 403) return "คุณไม่มีสิทธิ์ดำเนินการนี้";
+  if (status === 404) return "ไม่พบข้อมูลที่ต้องการ กรุณารีเฟรชแล้วลองใหม่";
+  if (status === 409) return "ไม่สามารถดำเนินการได้ในขณะนี้ กรุณารีเฟรชแล้วลองใหม่";
+  if (status === 413) return "ไฟล์มีขนาดเกินขีดจำกัด 25 MB";
+  if (status === 429) return "มีการส่งคำขอมากเกินไป กรุณารอสักครู่แล้วลองใหม่";
+  if (status >= 500) return "ระบบขัดข้องชั่วคราว กรุณาลองใหม่ภายหลัง";
+  if (status) return "เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง";
+  if (error?.name === "StudentApiError" && error.message) return error.message;
+  return "เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง";
 }
 
 function isEnrollmentApproved(course) {
@@ -127,6 +143,7 @@ function StudentPortal({ onTeacherPortal }) {
     setAssignmentDetail(null);
     setAssignments([]);
     setCourses([]);
+    setAuthMode("login");
     setAuthError("");
     setAuthSuccess(notice);
   }, []);
@@ -137,7 +154,7 @@ function StudentPortal({ onTeacherPortal }) {
     apiRequest("/auth/student/me", { token: savedSession.token })
       .then((payload) => {
         if (!active) return;
-        if (!payload.data || typeof payload.data !== "object") throw new StudentApiError("ข้อมูลบัญชีนิสิตไม่ถูกต้อง");
+        if (!payload.data || typeof payload.data !== "object") throw new StudentApiError("ไม่สามารถตรวจสอบบัญชีได้ กรุณาเข้าสู่ระบบใหม่");
         const verified = { token: savedSession.token, student: payload.data };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(verified));
         setSession(verified);
@@ -148,7 +165,7 @@ function StudentPortal({ onTeacherPortal }) {
         localStorage.removeItem(STORAGE_KEY);
         setSession(null);
         setSessionStatus("guest");
-        if (error.status !== 401) setAuthError(error.message);
+        if (error.status !== 401) setAuthError(studentFriendlyError(error));
         else setAuthSuccess("เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่");
       });
     return () => { active = false; };
@@ -167,7 +184,7 @@ function StudentPortal({ onTeacherPortal }) {
           apiRequest("/student/courses", { token: session.token, signal: controller.signal }),
         ]);
         if (!Array.isArray(assignmentPayload.data) || !Array.isArray(coursePayload.data)) {
-          throw new StudentApiError("Backend ส่งรายการงานหรือรายวิชามาในรูปแบบที่ไม่ถูกต้อง");
+          throw new StudentApiError("โหลดรายการงานไม่สำเร็จ กรุณาลองใหม่");
         }
         if (active) {
           const approvedCourseIds = new Set(
@@ -176,13 +193,13 @@ function StudentPortal({ onTeacherPortal }) {
           setAssignments(assignmentPayload.data.filter((assignment) => approvedCourseIds.has(String(assignment.course_id))));
           setCourses(coursePayload.data);
           if (coursePayload.data.some((course) => !hasEnrollmentStatus(course))) {
-            setDataError("Backend ที่กำลังทำงานยังไม่ส่งสถานะอนุมัติรายวิชา กรุณาปิด Backend เดิมแล้วเริ่มใหม่จากโฟลเดอร์ backend ก่อนลงทะเบียนหรือดูงาน");
+            setDataError("ไม่สามารถตรวจสอบสถานะการลงทะเบียนได้ กรุณาลองใหม่ภายหลัง");
           }
         }
       } catch (error) {
         if (!active || error.name === "AbortError") return;
         if (error.status === 401) endSession("เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่");
-        else setDataError(error.message);
+        else setDataError(studentFriendlyError(error));
       } finally {
         if (active) setDataLoading(false);
       }
@@ -204,12 +221,12 @@ function StudentPortal({ onTeacherPortal }) {
           token: session.token,
           signal: controller.signal,
         });
-        if (!payload.data || typeof payload.data !== "object") throw new StudentApiError("Backend ส่งรายละเอียดงานมาในรูปแบบที่ไม่ถูกต้อง");
+        if (!payload.data || typeof payload.data !== "object") throw new StudentApiError("โหลดรายละเอียดงานไม่สำเร็จ กรุณาลองใหม่");
         if (active) setAssignmentDetail(payload.data);
       } catch (error) {
         if (!active || error.name === "AbortError") return;
         if (error.status === 401) endSession("เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่");
-        else setDetailError(error.message);
+        else setDetailError(studentFriendlyError(error));
       } finally {
         if (active) setDetailLoading(false);
       }
@@ -258,7 +275,7 @@ function StudentPortal({ onTeacherPortal }) {
         method: "POST",
         body: JSON.stringify(body),
       });
-      if (!payload.data?.token || !payload.data?.student) throw new StudentApiError("Backend ไม่ได้คืน token และข้อมูลบัญชี จึงยังเข้าสู่ระบบไม่ได้");
+      if (!payload.data?.token || !payload.data?.student) throw new StudentApiError("เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
       const nextSession = { token: payload.data.token, student: payload.data.student };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession));
       setSession(nextSession);
@@ -273,8 +290,8 @@ function StudentPortal({ onTeacherPortal }) {
           ? "รหัสนิสิตนี้มีบัญชีแล้ว กรุณาเข้าสู่ระบบแทน"
           : error.status === 400
             ? "ตรวจสอบรหัสนิสิต ชื่อ และรหัสผ่าน (รหัสผ่านอย่างน้อย 8 ตัวอักษร)"
-            : error.message;
-      setAuthError(message || "ดำเนินการไม่สำเร็จ");
+            : studentFriendlyError(error);
+      setAuthError(message);
     } finally {
       setAuthLoading(false);
     }
@@ -283,7 +300,7 @@ function StudentPortal({ onTeacherPortal }) {
   async function enrollInCourse(course) {
     if (!session?.token) return;
     if (!hasEnrollmentStatus(course)) {
-      setDataError("Backend ที่กำลังทำงานยังไม่รองรับคำขอลงทะเบียนแบบรออนุมัติ กรุณาปิด Backend เดิมแล้วเริ่มใหม่จากโฟลเดอร์ backend");
+      setDataError("ขณะนี้ไม่สามารถส่งคำขอลงทะเบียนได้ กรุณาลองใหม่ภายหลัง");
       return;
     }
     setEnrollingCourseId(course.id);
@@ -296,7 +313,7 @@ function StudentPortal({ onTeacherPortal }) {
         body: JSON.stringify({ course_id: course.id }),
       });
       if (payload.data?.enrollment_status !== "PENDING") {
-        throw new StudentApiError("Backend ไม่ได้ยืนยันคำขอสถานะ PENDING จึงยังไม่แสดงว่าส่งคำขอแล้ว กรุณาตรวจสอบและเริ่ม Backend รุ่นล่าสุด");
+        throw new StudentApiError("ส่งคำขอลงทะเบียนไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
       }
       setEnrollmentNotice(`ส่งคำขอลงทะเบียน ${course.course_code} แล้ว รออาจารย์อนุมัติ`);
       setRefreshVersion((value) => value + 1);
@@ -304,8 +321,8 @@ function StudentPortal({ onTeacherPortal }) {
       if (error.status === 401) endSession("เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่");
       else if (error.status === 409) setDataError("มีคำขอลงทะเบียนรายวิชานี้อยู่แล้วหรือได้รับอนุมัติแล้ว กดรีเฟรชเพื่อตรวจสอบสถานะ");
       else setDataError(error.status === 404
-        ? "Backend ไม่พบ API ส่งคำขอลงทะเบียน หรือรายวิชาถูกลบ กรุณาหยุด Backend เดิมแล้วเริ่มใหม่จากโฟลเดอร์ backend"
-        : error.message);
+        ? "ไม่พบรายวิชาที่เลือก กรุณารีเฟรชรายการ"
+        : studentFriendlyError(error));
     } finally {
       setEnrollingCourseId(null);
     }
@@ -327,9 +344,9 @@ function StudentPortal({ onTeacherPortal }) {
         token: session?.token,
         body: JSON.stringify({ current_password: values.current_password, new_password: values.new_password }),
       });
-      if (payload.data?.updated !== true) throw new StudentApiError("Backend ไม่ได้ยืนยันการอัปเดตรหัสผ่าน");
+      if (payload.data?.updated !== true) throw new StudentApiError("เปลี่ยนรหัสผ่านไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
       setPasswordDialog(false);
-      setAuthSuccess("เปลี่ยนรหัสผ่านและอัปเดตในฐานข้อมูลแล้ว");
+      setAuthSuccess("เปลี่ยนรหัสผ่านเรียบร้อยแล้ว");
       form.reset();
     } catch (error) {
       if (error.status === 401) endSession("เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่");
@@ -337,7 +354,7 @@ function StudentPortal({ onTeacherPortal }) {
         ? "รหัสผ่านปัจจุบันไม่ถูกต้อง"
         : error.status === 400
           ? "รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร และไม่ซ้ำกับรหัสเดิม"
-          : error.message);
+          : studentFriendlyError(error));
     } finally {
       setPasswordSaving(false);
     }
@@ -372,7 +389,7 @@ function StudentPortal({ onTeacherPortal }) {
         body,
       });
       if (!payload.data?.file_original_name || !payload.data?.status) {
-        throw new StudentApiError("Backend ไม่ได้ยืนยันข้อมูลไฟล์ที่ส่ง จึงยังแสดงว่าส่งสำเร็จไม่ได้");
+        throw new StudentApiError("ส่งไฟล์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
       }
       setAssignmentDetail((current) => current ? ({
         ...current,
@@ -392,7 +409,7 @@ function StudentPortal({ onTeacherPortal }) {
         ? "เลยกำหนดส่งแล้ว ระบบไม่รับไฟล์เพิ่มเติม"
         : error.status === 413
           ? "ไฟล์มีขนาดเกินขีดจำกัด 25 MB"
-          : error.message || "อัปโหลดไฟล์ไม่สำเร็จ");
+        : studentFriendlyError(error));
     } finally {
       setUploading(false);
     }
@@ -484,9 +501,9 @@ function StudentPortal({ onTeacherPortal }) {
         <main className="auth-main student-auth-main" id="student-login">
           <section className="auth-intro">
             <span className="intro-mark" aria-hidden="true">S</span>
-            <p className="eyebrow">STUDENT WORKSPACE</p>
+            <p className="eyebrow">พื้นที่นิสิต</p>
             <h1>ติดตามงาน<br />และกำหนดส่ง</h1>
-            <p>เข้าสู่ระบบก่อนดูงานของรายวิชาที่ลงทะเบียน ข้อมูลทั้งหมดมาจากฐานข้อมูล Backend</p>
+            <p>เข้าสู่ระบบเพื่อดูงานและกำหนดส่งในรายวิชาที่ลงทะเบียนไว้</p>
             <div className="auth-points">
               <span><i>01</i> สมัครด้วยรหัสนิสิต</span>
               <span><i>02</i> ลงทะเบียนรายวิชา</span>
@@ -497,8 +514,8 @@ function StudentPortal({ onTeacherPortal }) {
           <section className="login-card student-login-card" aria-labelledby="student-login-title">
             <div className="login-card-heading">
               <span className="login-icon" aria-hidden="true">S</span>
-              <p className="eyebrow">STUDENT ACCESS</p>
-              <h2 id="student-login-title">{authMode === "login" ? "เข้าสู่ระบบนิสิต" : "สร้างบัญชีนิสิต"}</h2>
+              <p className="eyebrow">บัญชีนิสิต</p>
+              <h2 id="student-login-title">{authMode === "login" ? "เข้าสู่ระบบนิสิต" : "สมัครบัญชีนิสิต"}</h2>
               <p>ใช้รหัสนิสิตและรหัสผ่าน</p>
             </div>
 
@@ -508,7 +525,7 @@ function StudentPortal({ onTeacherPortal }) {
             </div>
 
             {authSuccess && <InfoMessage type="success" title="สำเร็จ">{authSuccess}</InfoMessage>}
-            {authError && <InfoMessage type="error" title="เข้าสู่ระบบไม่สำเร็จ">{authError}</InfoMessage>}
+            {authError && <InfoMessage type="error" title={authMode === "login" ? "เข้าสู่ระบบไม่สำเร็จ" : "สมัครบัญชีไม่สำเร็จ"}>{authError}</InfoMessage>}
 
             <form className="form-stack login-form" onSubmit={submitAuth}>
               <label className="field">
@@ -536,7 +553,7 @@ function StudentPortal({ onTeacherPortal }) {
                 {!authLoading && <span aria-hidden="true">→</span>}
               </button>
             </form>
-            <p className="login-footnote">{authMode === "register" ? "บัญชีจะถูกบันทึกในฐานข้อมูลจริง และรหัสผ่านจะถูกเข้ารหัสก่อนจัดเก็บ" : "ต้องเข้าสู่ระบบด้วยข้อมูลที่ตรงกับบัญชีใน Backend ก่อนดูรายการงาน"}</p>
+            <p className="login-footnote">{authMode === "register" ? "ใช้รหัสนิสิตและชื่อ-นามสกุลของคุณ" : "เข้าสู่ระบบด้วยบัญชีที่สมัครไว้เพื่อดูงานและกำหนดส่ง"}</p>
           </section>
         </main>
       ) : (
@@ -550,7 +567,7 @@ function StudentPortal({ onTeacherPortal }) {
             <button className={`nav-item ${page === "courses" || page === "course" || (page === "detail" && selectedCourseId != null) ? "is-active" : ""}`} type="button" onClick={showCourses}>
               <span className="nav-icon" aria-hidden="true">▤</span><span>รายวิชา</span><span className="nav-count">{courses.filter(isEnrollmentApproved).length}</span>
             </button>
-            <div className="nav-note"><p>ข้อมูลรายวิชา งาน และสถานะ submission จาก Backend</p></div>
+            <div className="nav-note"><p>รายวิชา งาน และสถานะการส่งงาน</p></div>
           </aside>
 
           <section className="main-panel">
@@ -562,7 +579,7 @@ function StudentPortal({ onTeacherPortal }) {
             {page === "courses" ? (
               <>
                 <div className="page-heading">
-                  <div><p className="eyebrow">MY COURSES</p><h1>รายวิชา</h1><p className="page-subtitle">ลงทะเบียนรายวิชาเพื่อดูงานที่อาจารย์เผยแพร่</p></div>
+                  <div><p className="eyebrow">รายวิชาของฉัน</p><h1>รายวิชา</h1><p className="page-subtitle">ลงทะเบียนรายวิชาเพื่อดูงานที่อาจารย์เผยแพร่</p></div>
                   <button className="button button-quiet" type="button" disabled={dataLoading} onClick={() => setRefreshVersion((value) => value + 1)}>รีเฟรช</button>
                 </div>
                 <InfoMessage title="ส่งคำขอลงทะเบียน">เลือกรายวิชาที่เรียนเพื่อส่งคำขอ อาจารย์จะตรวจสอบก่อนอนุมัติ และงานจะแสดงหลังได้รับอนุมัติแล้ว</InfoMessage>
@@ -594,7 +611,7 @@ function StudentPortal({ onTeacherPortal }) {
                           <p className="card-description">{course.description || "ไม่มีรายละเอียดรายวิชา"}</p>
                           <div className="card-actions">
                             {enrolled ? <span className="status-pill status-reviewed">ลงทะเบียนแล้ว · คลิกเพื่อดูงาน</span>
-                              : !enrollmentStatusAvailable ? <span className="status-pill status-late">ตรวจสถานะไม่ได้ · อัปเดต Backend</span>
+                              : !enrollmentStatusAvailable ? <span className="status-pill status-late">ตรวจสอบสถานะไม่ได้</span>
                                 : course.enrollment_status === "PENDING" ? <span className="status-pill status-draft">รออาจารย์อนุมัติ · ยังเข้าไม่ได้</span>
                                 : (
                                   <>
@@ -619,7 +636,7 @@ function StudentPortal({ onTeacherPortal }) {
                 {selectedCourse ? (
                   <>
                     <div className="page-heading">
-                      <div><p className="eyebrow">COURSE WORK</p><h1>{selectedCourse.course_name}</h1><p className="page-subtitle">{selectedCourse.course_code} · {selectedCourse.description || "ไม่มีรายละเอียดรายวิชา"}</p></div>
+                      <div><p className="eyebrow">งานในรายวิชา</p><h1>{selectedCourse.course_name}</h1><p className="page-subtitle">{selectedCourse.course_code} · {selectedCourse.description || "ไม่มีรายละเอียดรายวิชา"}</p></div>
                       <span className={`status-pill ${isEnrollmentApproved(selectedCourse) ? "status-reviewed" : "status-none"}`}>
                         {isEnrollmentApproved(selectedCourse) ? "อนุมัติแล้ว" : selectedCourse.enrollment_status === "PENDING" ? "รออนุมัติ" : "ยังไม่ได้รับอนุมัติ"}
                       </span>
@@ -652,7 +669,7 @@ function StudentPortal({ onTeacherPortal }) {
                       <>
                         <div className="student-summary-strip">
                           <div><strong>{dataLoading ? "…" : selectedCourseAssignments.length}</strong><span>งานที่เผยแพร่ในรายวิชานี้</span></div>
-                          <div><strong>{dataLoading ? "…" : selectedCourseAssignments.filter((item) => item.submission_status).length}</strong><span>มีสถานะ submission</span></div>
+                          <div><strong>{dataLoading ? "…" : selectedCourseAssignments.filter((item) => item.submission_status).length}</strong><span>ส่งงานแล้ว</span></div>
                           <div><strong>{dataLoading ? "…" : selectedCourseAssignments.filter((item) => item.submission_status === "REVIEWED").length}</strong><span>ตรวจแล้ว</span></div>
                         </div>
                         <div className="student-list-toolbar">
@@ -693,21 +710,21 @@ function StudentPortal({ onTeacherPortal }) {
                 ) : assignmentDetail ? (
                   <>
                     <div className="page-heading detail-heading">
-                      <div><p className="eyebrow">ASSIGNMENT DETAIL</p><h1>{assignmentDetail.title}</h1><p className="page-subtitle">{assignmentDetail.course_code} · {assignmentDetail.course_name}</p></div>
+                      <div><p className="eyebrow">รายละเอียดงาน</p><h1>{assignmentDetail.title}</h1><p className="page-subtitle">{assignmentDetail.course_code} · {assignmentDetail.course_name}</p></div>
                       <span className="status-pill status-published">เผยแพร่แล้ว</span>
                     </div>
                     <article className="student-detail-card">
                       <div className="student-detail-row"><span>กำหนดส่ง</span><strong>{formatDate(assignmentDetail.due_at)}{deadlinePassed ? " · ปิดรับแล้ว" : ""}</strong></div>
                       <div className="student-detail-row"><span>รายละเอียด</span><p>{assignmentDetail.description || "ไม่มีรายละเอียดเพิ่มเติม"}</p></div>
-                      <div className="student-detail-row"><span>สถานะ submission</span><strong className={`status-pill status-${String(assignmentDetail.submission_status || "none").toLowerCase()}`}>{statusText(assignmentDetail.submission_status)}</strong></div>
+                      <div className="student-detail-row"><span>สถานะการส่งงาน</span><strong className={`status-pill status-${String(assignmentDetail.submission_status || "none").toLowerCase()}`}>{statusText(assignmentDetail.submission_status)}</strong></div>
                       <div className="student-detail-row"><span>เวลาที่ส่ง</span><strong>{assignmentDetail.submitted_at ? formatDate(assignmentDetail.submitted_at) : "—"}</strong></div>
                       <div className="student-detail-row"><span>ไฟล์ที่ส่ง</span><strong>{assignmentDetail.file_original_name || "—"}{assignmentDetail.file_size != null ? ` · ${(Number(assignmentDetail.file_size) / (1024 * 1024)).toFixed(2)} MB` : ""}</strong></div>
                       <div className="student-detail-row"><span>คะแนน</span><strong>{assignmentDetail.score == null ? `ยังไม่มีคะแนน · คะแนนเต็ม ${assignmentDetail.max_score ?? 100}` : `${assignmentDetail.score} / ${assignmentDetail.max_score ?? 100}`}</strong></div>
-                      <div className="student-detail-row"><span>Feedback จากอาจารย์</span><p>{assignmentDetail.remarks || "—"}</p></div>
+                      <div className="student-detail-row"><span>ความคิดเห็นจากอาจารย์</span><p>{assignmentDetail.remarks || "—"}</p></div>
                     </article>
                     <section className="student-submit-card" aria-labelledby="student-submit-title">
                       <div className="student-submit-content">
-                        <p className="eyebrow">UPLOAD / SUBMIT</p><h2 id="student-submit-title">ส่งงาน</h2>
+                        <p className="eyebrow">รายละเอียดการส่งงาน</p><h2 id="student-submit-title">ส่งงาน</h2>
                         <p>รองรับทุกนามสกุลไฟล์ ขนาดไม่เกิน 25 MB หากส่งใหม่ ไฟล์เดิมและคะแนนเดิมจะถูกแทนที่</p>
                         {deadlinePassed ? <InfoMessage type="warning" title="ปิดรับงานแล้ว">เลยกำหนดส่ง {formatDate(assignmentDetail.due_at)} ระบบไม่รับไฟล์ใหม่หรือไฟล์แก้ไข</InfoMessage> : null}
                         {uploadSuccess ? <InfoMessage type="success" title="ส่งงานสำเร็จ">{uploadSuccess}</InfoMessage> : null}
@@ -726,12 +743,12 @@ function StudentPortal({ onTeacherPortal }) {
             ) : (
               <>
                 <div className="page-heading">
-                  <div><p className="eyebrow">STUDENT DASHBOARD</p><h1>งานของฉัน</h1><p className="page-subtitle">งานที่เผยแพร่ในรายวิชาที่ลงทะเบียน และสถานะ submission ของบัญชีนี้</p></div>
+                  <div><p className="eyebrow">ภาพรวมงานของฉัน</p><h1>งานของฉัน</h1><p className="page-subtitle">งานในรายวิชาที่ลงทะเบียนและสถานะการส่งงานของคุณ</p></div>
                   <div className="heading-actions"><button className="button button-quiet" type="button" disabled={dataLoading} onClick={() => setRefreshVersion((value) => value + 1)}>รีเฟรช</button><button className="button button-secondary" type="button" onClick={() => setPage("courses")}>ดูรายวิชา</button></div>
                 </div>
                 <div className="student-summary-strip">
                   <div><strong>{dataLoading ? "…" : assignments.length}</strong><span>งานในรายวิชาของฉัน</span></div>
-                  <div><strong>{dataLoading ? "…" : assignments.filter((item) => item.submission_status).length}</strong><span>มีสถานะส่งในระบบ</span></div>
+                  <div><strong>{dataLoading ? "…" : assignments.filter((item) => item.submission_status).length}</strong><span>ส่งงานแล้ว</span></div>
                   <div><strong>{dataLoading ? "…" : assignments.filter((item) => item.submission_status === "REVIEWED").length}</strong><span>ตรวจแล้ว</span></div>
                 </div>
                 <div className="student-list-toolbar">
@@ -764,13 +781,13 @@ function StudentPortal({ onTeacherPortal }) {
         </main>
       )}
 
-      <footer className="footer"><span>ระบบติดตามสถานะการส่งงานของนิสิต · ข้อมูลจริงจาก Backend</span></footer>
+      <footer className="footer"><span>ระบบติดตามสถานะการส่งงานของนิสิต · พื้นที่นิสิต</span></footer>
 
       {passwordDialog && sessionStatus === "authenticated" && (
         <div className="modal-backdrop" role="presentation">
           <section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="student-password-title">
             <div className="modal-heading">
-              <div><p className="eyebrow">ACCOUNT SECURITY</p><h2 id="student-password-title">เปลี่ยนรหัสผ่านนิสิต</h2></div>
+              <div><p className="eyebrow">ความปลอดภัยบัญชี</p><h2 id="student-password-title">เปลี่ยนรหัสผ่านนิสิต</h2></div>
               <button className="modal-close" type="button" aria-label="ปิด" onClick={() => setPasswordDialog(false)}>×</button>
             </div>
             {passwordError && <InfoMessage type="error" title="เปลี่ยนรหัสผ่านไม่สำเร็จ">{passwordError}</InfoMessage>}

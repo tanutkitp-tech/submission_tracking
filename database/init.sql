@@ -122,3 +122,22 @@ CREATE TABLE IF NOT EXISTS submissions (
     REFERENCES students(id)
     ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS auth_rate_limit_buckets (
+  bucket_key BINARY(32) NOT NULL,
+  attempt_count INT UNSIGNED NOT NULL,
+  reset_at BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (bucket_key),
+  KEY idx_auth_rate_limit_reset_at (reset_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS teacher_signup_invites (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  code_hash BINARY(32) NOT NULL,
+  expires_at BIGINT UNSIGNED NOT NULL,
+  used_at BIGINT UNSIGNED NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_teacher_signup_invite_code_hash (code_hash),
+  KEY idx_teacher_signup_invite_expires_at (expires_at)
+) ENGINE=InnoDB;

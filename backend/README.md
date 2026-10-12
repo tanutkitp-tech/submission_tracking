@@ -12,14 +12,15 @@
 - `src/validators/`: ตรวจ body, path params และ query params ก่อนเรียก service
 - `src/config/`: การตั้งค่า MySQL connection pool
 - `src/middleware/`: JWT authentication, 404 และ error handling
-- `scripts/`: ตรวจ schema และสร้างบัญชีอาจารย์เริ่มต้นแบบไม่เขียนทับ
+- `scripts/`: ตรวจ schema, เตรียมตารางเสริม และสร้างบัญชีหรือรหัสเชิญอาจารย์
 
 1. จากโฟลเดอร์ `backend` รัน `npm install`.
 2. คัดลอก `.env.example` เป็น `.env` แล้วกรอกค่าการเชื่อมต่อ MySQL ให้ตรงกับ `database/.env` (ห้ามนำ secret เข้า Git)
 3. ตั้ง `JWT_SECRET` เป็นค่าสุ่มอย่างน้อย 32 ตัวอักษร (เช่นสร้างด้วย `node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"`).
 4. หากต้องการเริ่มฐานข้อมูล ให้รันจาก root: `docker compose -f database/docker-compose.yml --env-file database/.env up -d`. phpMyAdmin อยู่ที่ `http://localhost:8080`, MySQL host port คือ `3307`. ห้ามใช้คำสั่งลบ volume.
 5. สร้างบัญชีอาจารย์แบบควบคุม: กำหนด `INITIAL_TEACHER_EMAIL`, `INITIAL_TEACHER_NAME`, `INITIAL_TEACHER_PASSWORD` ชั่วคราวใน `backend/.env` แล้วรัน `npm run seed:teacher`. Script จะไม่เขียนทับบัญชีเดิม และต้องใช้รหัสผ่านอย่างน้อย 12 ตัวอักษร; ลบค่ารหัสผ่านชั่วคราวออกหลังสร้างเสร็จ.
-6. รัน `npm start` หรือ `npm run dev`. ค่าเริ่มต้นคือ `http://localhost:3000`.
+6. ฐานข้อมูลใหม่จะสร้างตารางเสริมจาก `database/init.sql` อยู่แล้ว. สำหรับฐานข้อมูลเดิม ให้รัน `npm run migrate:production-security`; คำสั่งนี้สร้างเฉพาะตารางที่ยังไม่มีและไม่แก้ข้อมูลเดิม.
+7. เมื่อนำขึ้นใช้งานจริง ให้กำหนด `NODE_ENV=production` ใน environment ของบริการ แล้วรัน `npm start`. หากไม่กำหนด ระบบจะใช้โหมดพัฒนาและสมัครอาจารย์โดยไม่ใช้รหัสเชิญได้; `npm run dev` ใช้สำหรับพัฒนาในเครื่อง. ค่าเริ่มต้นคือ `http://localhost:3000`.
 
 ### เพิ่มระบบบัญชีนิสิตในฐานข้อมูลเดิม
 
@@ -41,6 +42,7 @@
 |---|---|---|---|
 | GET | `/api/health` | สาธารณะ | สถานะ process |
 | GET | `/api/health/db` | สาธารณะ | query ฐานข้อมูลจริง; เมื่อ DB ล่มตอบ 500 แบบไม่เปิดเผยรายละเอียด |
+| POST | `/api/auth/register` | สาธารณะ | body `{ "full_name":"Teacher Example", "email":"teacher@example.test", "password":"...", "invite_code":"..." }`; สมัครอาจารย์และคืน token; อีเมลต้องมีส่วนลงท้ายและรหัสผ่าน 8–72 bytes; production ต้องใช้รหัสเชิญที่ยังไม่หมดอายุและยังไม่เคยใช้ |
 | POST | `/api/auth/login` | สาธารณะ | body `{ "email":"teacher@example.com", "password":"..." }`; คืน token และข้อมูลอาจารย์โดยไม่คืน hash |
 | GET | `/api/auth/me` | อาจารย์ | ข้อมูลบัญชีจาก token |
 | PATCH | `/api/auth/password` | อาจารย์ | body `{ "current_password":"...", "new_password":"..." }`; ตรวจรหัสเดิมและอัปเดต hash ใน `teachers.password_hash` |
@@ -72,6 +74,14 @@
 | GET | `/api/student/assignments/:id` | นิสิต | รายละเอียดและสถานะ submission ของงานในรายวิชาที่ได้รับอนุมัติ; งานอื่นตอบ 404 |
 | POST | `/api/student/assignments/:id/submission` | นิสิตที่ได้รับอนุมัติในรายวิชา | `multipart/form-data` field `file`; รับทุกนามสกุล ขนาดไม่เกิน 25 MB; API ปฏิเสธด้วย 409 เมื่อเลย `due_at`; ส่งไฟล์ใหม่ก่อนกำหนดจะแทนไฟล์เดิมและล้างคะแนน/feedback |
 
+คำขอเข้าสู่ระบบจำกัด 10 ครั้งต่อ IP และอีเมลหรือรหัสนิสิตใน 15 นาที และคำขอสมัครจำกัด 5 ครั้งต่อ IP และอีเมลหรือรหัสนิสิตใน 1 ชั่วโมง เพื่อไม่ให้ผู้ใช้ในเครือข่ายเดียวกันจำกัดกันเอง. ตัวนับเก็บในตาราง MySQL ที่ใช้ร่วมกันได้ทุก instance โดยเก็บ HMAC แทน IP และตัวระบุบัญชี. ทุก instance ต้องใช้ `JWT_SECRET` เดียวกันเพื่อให้ตัวนับร่วมกันได้. หลัง reverse proxy ให้ตั้ง `TRUST_PROXY_HOPS` เป็นจำนวน proxy ที่เชื่อถือได้; ค่าเริ่มต้น 0 จะไม่ใช้ IP จาก header ที่ส่งต่อมา. หากฐานข้อมูลตารางนี้ใช้งานไม่ได้ ระบบจะปฏิเสธคำขอแทนการปิดตัวจำกัด.
+
+ก่อนเปิดให้สมัครอาจารย์ใน production ให้ผู้ดูแลรัน `npm run invite:teacher` จากโฟลเดอร์ `backend` หลังเตรียมตารางเสริมแล้ว คำสั่งจะแสดงรหัสใช้ครั้งเดียวซึ่งหมดอายุใน 24 ชั่วโมง ส่งรหัสให้ผู้สมัครโดยตรงผ่านช่องทางที่ปลอดภัย; ระบบเก็บเฉพาะ hash และจะใช้รหัสได้กับบัญชีเดียว. รหัสนี้ยังไม่ใช่การยืนยันเจ้าของอีเมล ผู้ดูแลจึงควรส่งให้ผู้สมัครที่ตรวจสอบแล้ว. หากไม่มีผู้ดูแลติดต่อให้ขอรหัสจากผู้ดูแลระบบของโปรเจกต์. โหมดพัฒนายังสมัครได้โดยไม่กรอกรหัสเพื่อให้ทดสอบในเครื่องต่อได้.
+
+ไฟล์ `database/all_database.sql` ยังถูกติดตามใน Git ของโปรเจกต์นี้และอาจมีข้อมูลที่ระบุตัวบุคคลได้. ห้ามเผยแพร่ repository หรือส่งต่อไฟล์นี้จนกว่าจะตรวจและแทนข้อมูลจริงด้วยข้อมูลตัวอย่างแล้ว; การลบไฟล์ออกจาก working tree อย่างเดียวไม่ลบสำเนาในประวัติ Git.
+
+ไฟล์งานที่อัปโหลดเก็บไว้ใน `backend/storage/submissions`. ก่อน deploy ให้ตั้ง persistent storage และสำรองข้อมูลโฟลเดอร์นี้ควบคู่กับฐานข้อมูล; หากรัน Backend หลาย instance ต้องใช้พื้นที่เก็บไฟล์ร่วมกัน.
+
 รายการ `/api/courses/mine` และ `/api/assignments/mine` รองรับ `page` และ `limit` (ค่าเริ่มต้น 1 และ 20, `limit` สูงสุด 100) และคืน `pagination: { page, limit, total, pages }` เพิ่มจาก `data`.
 
 การดูงานทุก endpoint ต้องเข้าสู่ระบบก่อน: API งานรวมเดิมจำกัดอาจารย์ ส่วน Student endpoints ตรวจ JWT role และแสดงงานเฉพาะ enrollment สถานะ `APPROVED`. งาน Draft และ Closed ไม่ปรากฏในรายการงานของนิสิต. การสมัครสร้างแถว `students`; การขอลงทะเบียนสร้างแถว `enrollments` สถานะ `PENDING`; อาจารย์เจ้าของรายวิชาเท่านั้นที่อนุมัติหรือปฏิเสธได้. รหัสผ่านเปลี่ยนได้หลังยืนยันรหัสเดิม; phpMyAdmin จะแสดง bcrypt hash ไม่ใช่รหัสที่อ่านได้. บัญชีเก่าที่มีรหัสผ่าน plaintext ในคอลัมน์ `password_hash` จะถูกแฮชใหม่เมื่อเข้าสู่ระบบสำเร็จ. ไฟล์ submission เก็บใน `backend/storage/submissions` โดยใช้ชื่อสุ่มที่ไม่เปิดเผยต่อสาธารณะ; ตาราง `submissions` เก็บ metadata และคะแนนเท่านั้น การโหลดไฟล์ต้องผ่าน API ที่ตรวจ token อาจารย์เจ้าของงานและส่งเป็น attachment.
@@ -83,7 +93,7 @@ Datetime ที่ส่งเข้ามาพร้อม timezone จะถ�
 ## ทดสอบ
 
 - Automated unit tests: `npm test`.
-- Read-only HTTP + MySQL integration checks: start Docker/MySQL and run `npm run test:integration`.
+- HTTP + MySQL integration checks: start Docker/MySQL and run `npm run test:integration`. การทดสอบจะเพิ่มตัวนับในตารางความปลอดภัยซึ่งระบบล้างรายการหมดอายุเป็นระยะ.
 - Read-only schema check: `npm run check:schema`.
 - API integration ต้องเปิด MySQL จริงและตั้ง `.env`; ใช้ `npm start` แล้วตรวจ `GET /api/health/db` และคำขอจริงใน Postman.
 - Postman: ตั้ง `baseUrl=http://localhost:3000`. เรียก login แล้วใส่ token เป็น Bearer Token สำหรับ `/me` และ CRUD. ตรวจกรณีไม่มี token (401), token ผิด/หมดอายุ (401), เปลี่ยนเจ้าของ (403), ID ไม่มี (404), input ผิด (400), duplicate/FK conflict (409), และ DB หยุดทำงาน (`/api/health/db` ตอบ 500).

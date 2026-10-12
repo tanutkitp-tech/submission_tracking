@@ -27,14 +27,14 @@ async function apiRequest(path, options = {}) {
   try {
     response = await fetch(API_BASE_URL + path, { ...requestOptions, headers });
   } catch {
-    throw new ApiError("เชื่อมต่อ Backend ไม่ได้ กรุณาตรวจสอบว่า Backend ทำงานที่ http://localhost:3000");
+    throw new ApiError("ไม่สามารถเชื่อมต่อระบบได้ กรุณาลองใหม่อีกครั้ง");
   }
 
   let payload;
   try {
     payload = await response.json();
   } catch {
-    throw new ApiError("Backend ส่งข้อมูลกลับมาในรูปแบบที่อ่านไม่ได้", response.status);
+    throw new ApiError("ระบบตอบกลับไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง", response.status);
   }
 
   if (response.status === 401 && token) {
@@ -63,22 +63,28 @@ function friendlyError(error, context = "") {
     return "ลบรายวิชาไม่ได้ เพราะยังมีงานหรือนิสิตลงทะเบียนที่เกี่ยวข้อง";
   }
   if (error?.status === 409 && context === "assignment-delete") {
-    return "ลบงานไม่ได้ เพราะมี submission ที่เกี่ยวข้อง";
+    return "ลบงานไม่ได้ เพราะมีการส่งงานที่เกี่ยวข้อง";
   }
   if (error?.status === 409) {
+    if (error.message === "A record with the same unique value already exists") {
+      return "ข้อมูลนี้มีอยู่แล้ว กรุณาตรวจสอบรหัสรายวิชา";
+    }
+    if (error.message === "Enrollment request has already been reviewed") {
+      return "คำขอนี้ได้รับการพิจารณาแล้ว กรุณารีเฟรชรายการ";
+    }
     if (error.message === "Assignment has submissions and cannot be moved to another course") {
-      return "ย้ายงานไม่ได้ เพราะมี submission ของนิสิตแล้ว";
+      return "ย้ายงานไม่ได้ เพราะมีนิสิตส่งงานนี้แล้ว";
     }
     if (error.message === "New maximum score is lower than an existing submission score") {
       return "ลดคะแนนเต็มไม่ได้ เพราะมีคะแนนที่บันทึกไว้สูงกว่าคะแนนเต็มใหม่";
     }
-    return "ข้อมูลซ้ำหรือมีรายการที่เกี่ยวข้อง จึงทำรายการนี้ไม่ได้";
+    return "ไม่สามารถดำเนินการได้ เนื่องจากข้อมูลมีการเปลี่ยนแปลง กรุณารีเฟรชแล้วลองใหม่";
   }
   if (error?.status === 400 && error.message?.startsWith("Score cannot exceed")) {
     return "คะแนนที่กรอกเกินคะแนนเต็มของงานนี้";
   }
   if (error?.status === 404 && context === "enrollment-list") {
-    return "Backend ที่กำลังทำงานยังไม่มี API คำขอลงทะเบียน กรุณาหยุด Backend เดิมแล้วเริ่ม npm start ใหม่จากโฟลเดอร์ backend";
+    return "ไม่สามารถโหลดคำขอลงทะเบียนได้ กรุณาลองใหม่ภายหลัง";
   }
   if (error?.status === 400) {
     const messages = {
@@ -91,14 +97,43 @@ function friendlyError(error, context = "") {
       "Score is required to mark submission as reviewed": "กรุณากรอกคะแนนก่อนบันทึกผลตรวจ",
       "Invalid assignment status": "กรุณาเลือกสถานะงานที่ถูกต้อง",
       "max_score must be a positive number with up to two decimal places": "คะแนนเต็มต้องมากกว่า 0 และมีทศนิยมไม่เกิน 2 ตำแหน่ง",
+      "Password must be no more than 72 bytes": "รหัสผ่านต้องมีความยาวไม่เกิน 72 ไบต์",
     };
-    return messages[error.message] || error.message || "ข้อมูลที่กรอกไม่ถูกต้อง";
+    return messages[error.message] || "ข้อมูลที่กรอกไม่ถูกต้อง กรุณาตรวจสอบแล้วลองใหม่";
   }
-  if (error?.status === 401) return "อีเมลหรือรหัสผ่านไม่ถูกต้อง หรือเซสชันหมดอายุ";
+  if (error?.status === 401) return "เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่";
   if (error?.status === 413) return "ไฟล์มีขนาดเกินขีดจำกัด 25 MB";
-  if (error?.status === 403) return "บัญชีนี้ไม่มีสิทธิ์ทำรายการดังกล่าว";
+  if (error?.status === 429) return "มีการส่งคำขอมากเกินไป กรุณารอสักครู่แล้วลองใหม่";
+  if (error?.status === 403) return "คุณไม่มีสิทธิ์ดำเนินการนี้";
   if (error?.status === 404) return "ไม่พบรายการนี้ หรือรายการถูกลบไปแล้ว";
-  return error?.message || "เกิดข้อผิดพลาด กรุณาลองใหม่";
+  if (error?.status >= 500) return "ระบบขัดข้องชั่วคราว กรุณาลองใหม่ภายหลัง";
+  if (error?.status === 415) return "ไฟล์ชนิดนี้ไม่รองรับการแสดงตัวอย่าง กรุณาดาวน์โหลดเพื่อเปิดดู";
+  if (error?.status) return "เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง";
+  if (error?.name === "TypeError") return "ไม่สามารถเชื่อมต่อระบบได้ กรุณาลองใหม่อีกครั้ง";
+  if (error?.name === "ApiError" && error.message) return error.message;
+  return "เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง";
+}
+
+function teacherRegistrationErrorMessage(error, inviteCode) {
+  if (error?.status === 409) return "อีเมลนี้มีบัญชีแล้ว กรุณาเข้าสู่ระบบ";
+  if (error?.status === 403) {
+    return String(inviteCode || "").trim()
+      ? "รหัสเชิญไม่ถูกต้อง หมดอายุ หรือถูกใช้แล้ว กรุณาขอรหัสใหม่จากผู้ดูแลระบบ"
+      : "บัญชีนี้ต้องใช้รหัสเชิญ กรุณาติดต่อผู้ดูแลระบบ";
+  }
+  if (error?.status === 503) return "ระบบสมัครบัญชีไม่พร้อมใช้งาน กรุณาติดต่อผู้ดูแลระบบ";
+  if (error?.status === 400) {
+    const messages = {
+      "Invalid full_name": "กรุณากรอกชื่อ-นามสกุลไม่เกิน 150 ตัวอักษร",
+      "Valid email with a domain ending is required": "กรุณากรอกอีเมลให้ถูกต้องและมีส่วนลงท้าย เช่น .com หรือ .ac.th",
+      "Password must be at least 8 characters and no more than 72 bytes": "รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร และไม่เกิน 72 ไบต์",
+      "Password must be no more than 72 bytes": "รหัสผ่านต้องมีความยาวไม่เกิน 72 ไบต์",
+      "Invalid invitation code": "รหัสเชิญไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง",
+      "Unexpected field in teacher registration body": "หน้าเว็บไม่เป็นเวอร์ชันล่าสุด กรุณาโหลดหน้าใหม่แล้วลองอีกครั้ง",
+    };
+    return messages[error.message] || "ข้อมูลสมัครไม่ครบหรือไม่ถูกต้อง กรุณาตรวจสอบทุกช่องแล้วลองใหม่";
+  }
+  return friendlyError(error);
 }
 
 function formatDate(value) {
@@ -162,7 +197,7 @@ function statusLabel(status) {
     APPROVED: "อนุมัติแล้ว",
     REJECTED: "ไม่อนุมัติ",
   };
-  return labels[status] || status || "ยังไม่มี submission";
+  return labels[status] || (status ? "ไม่ทราบสถานะ" : "ยังไม่ได้ส่งงาน");
 }
 
 function StatusPill({ status }) {
@@ -275,32 +310,20 @@ function SystemHealth() {
     setCheckVersion((value) => value + 1);
   }
 
-  const apiLabel = health.loading
-    ? "กำลังตรวจ API"
-    : health.api
-      ? "API พร้อม"
-      : "API ไม่พร้อม";
-  const databaseLabel = health.loading
-    ? "กำลังตรวจฐานข้อมูล"
-    : health.database === null
-      ? "ยังตรวจฐานข้อมูลไม่ได้"
-      : health.database
-        ? "ฐานข้อมูลพร้อม"
-        : "ฐานข้อมูลไม่พร้อม";
+  const systemReady = health.api && health.database;
+  const healthLabel = health.loading
+    ? "กำลังตรวจสอบระบบ"
+    : systemReady
+      ? "ระบบพร้อมใช้งาน"
+      : "ระบบไม่พร้อมใช้งาน";
 
   return (
     <div className="system-health" aria-live="polite">
       <span className={"health-indicator " + (
-        health.loading ? "health-checking" : health.api ? "health-online" : "health-offline"
+        health.loading ? "health-checking" : systemReady ? "health-online" : "health-offline"
       )}>
         <i aria-hidden="true" />
-        {apiLabel}
-      </span>
-      <span className={"health-indicator " + (
-        health.loading ? "health-checking" : health.database ? "health-online" : "health-offline"
-      )}>
-        <i aria-hidden="true" />
-        {databaseLabel}
+        {healthLabel}
       </span>
       <button
         className="health-retry"
@@ -324,6 +347,7 @@ function App() {
   const [authRole, setAuthRole] = useState(() =>
     window.location.hash.startsWith("#/student") ? "student" : "teacher",
   );
+  const [teacherAuthMode, setTeacherAuthMode] = useState("login");
   const [sessionReady, setSessionReady] = useState(() => !initialSession?.token);
   const [authMessage, setAuthMessage] = useState("");
   const [authError, setAuthError] = useState("");
@@ -389,6 +413,7 @@ function App() {
     localStorage.removeItem(STORAGE_KEY);
     setToken("");
     setTeacher(null);
+    setTeacherAuthMode("login");
     setSessionReady(true);
     setActiveView("courses");
     setSelectedAssignment(null);
@@ -435,7 +460,7 @@ function App() {
           { token, onUnauthorized: () => clearSession(true) },
         );
         if (!Array.isArray(payload.data) || !payload.pagination) {
-          throw new ApiError("Backend ส่งรายการหรือข้อมูล pagination มาไม่ครบ");
+          throw new ApiError("โหลดรายการไม่สำเร็จ กรุณาลองใหม่");
         }
         if (!active) return;
         if (resource === "courses") {
@@ -472,7 +497,7 @@ function App() {
           { token, onUnauthorized: () => clearSession(true) },
         );
       if (!Array.isArray(payload.data)) {
-        throw new ApiError("Backend ส่งรายการ submission มาในรูปแบบที่ไม่ถูกต้อง");
+        throw new ApiError("โหลดสถานะการส่งงานไม่สำเร็จ กรุณาลองใหม่");
       }
       if (active) {
         setSubmissions(payload.data);
@@ -502,7 +527,7 @@ function App() {
           token,
           onUnauthorized: () => clearSession(true),
         });
-        if (!Array.isArray(payload.data)) throw new ApiError("Backend ส่งคำขอลงทะเบียนมาในรูปแบบที่ไม่ถูกต้อง");
+        if (!Array.isArray(payload.data)) throw new ApiError("โหลดคำขอลงทะเบียนไม่สำเร็จ กรุณาลองใหม่");
         if (active) setEnrollmentRequests(payload.data);
       } catch (error) {
         if (active) setEnrollmentsError(friendlyError(error, "enrollment-list"));
@@ -514,23 +539,33 @@ function App() {
     return () => { active = false; };
   }, [token, sessionReady, activeView, enrollmentRefresh, clearSession]);
 
-  async function submitLogin(event) {
+  async function submitTeacherAuth(event) {
     event.preventDefault();
     const form = event.currentTarget;
     const formData = new FormData(form);
+    const isRegister = teacherAuthMode === "register";
+    if (isRegister && formData.get("password") !== formData.get("password_confirm")) {
+      setAuthError("รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน");
+      return;
+    }
     setLoginLoading(true);
     setAuthError("");
     setAuthMessage("");
     try {
-      const payload = await apiRequest("/auth/login", {
+      const payload = await apiRequest(isRegister ? "/auth/register" : "/auth/login", {
         method: "POST",
-        body: JSON.stringify({
+        body: JSON.stringify(isRegister ? {
+          full_name: formData.get("full_name"),
+          email: formData.get("email"),
+          password: formData.get("password"),
+          invite_code: formData.get("invite_code"),
+        } : {
           email: formData.get("email"),
           password: formData.get("password"),
         }),
       });
       if (!payload.data?.token || !payload.data?.teacher) {
-        throw new ApiError("Backend ไม่ได้ส่งข้อมูลเซสชันกลับมา");
+        throw new ApiError("เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload.data));
       setTeacher(payload.data.teacher);
@@ -540,7 +575,11 @@ function App() {
       setActiveView("courses");
       form.reset();
     } catch (error) {
-      setAuthError(friendlyError(error));
+      setAuthError(isRegister
+        ? teacherRegistrationErrorMessage(error, formData.get("invite_code"))
+        : error.status === 401
+          ? "อีเมลหรือรหัสผ่านไม่ถูกต้อง"
+          : friendlyError(error));
     } finally {
       setLoginLoading(false);
     }
@@ -580,7 +619,7 @@ function App() {
         onUnauthorized: () => clearSession(true),
       });
       if (!Array.isArray(first.data) || !first.pagination) {
-        throw new ApiError("Backend ส่งรายการรายวิชาหรือ pagination มาไม่ครบ");
+        throw new ApiError("โหลดรายวิชาไม่สำเร็จ กรุณาลองใหม่");
       }
       const pages = Number(first.pagination.pages) || 0;
       const remaining = await Promise.all(
@@ -593,7 +632,7 @@ function App() {
       );
       const allCourses = first.data.concat(...remaining.map((page) => {
         if (!Array.isArray(page.data)) {
-          throw new ApiError("Backend ส่งรายการรายวิชามาในรูปแบบที่ไม่ถูกต้อง");
+          throw new ApiError("โหลดรายวิชาไม่สำเร็จ กรุณาลองใหม่");
         }
         return page.data;
       }));
@@ -757,7 +796,7 @@ function App() {
         },
       );
       if (payload.data?.status !== "REVIEWED" || payload.data?.score == null) {
-        throw new ApiError("Backend ไม่ได้ยืนยันการบันทึกคะแนนและสถานะตรวจแล้ว");
+        throw new ApiError("บันทึกคะแนนไม่สำเร็จ กรุณาลองใหม่");
       }
       setNotice({ type: "success", text: "บันทึกคะแนนและผลตรวจแล้ว" });
       setSubmissionRefresh((value) => value + 1);
@@ -863,7 +902,7 @@ function App() {
         },
       );
       if (payload.data?.enrollment_status !== status) {
-        throw new ApiError("Backend ไม่ได้ยืนยันผลการพิจารณาคำขอลงทะเบียน");
+        throw new ApiError("บันทึกผลการพิจารณาไม่สำเร็จ กรุณาลองใหม่");
       }
       setNotice({
         type: "success",
@@ -910,7 +949,7 @@ function App() {
         body: JSON.stringify({ current_password: values.current_password, new_password: values.new_password }),
       });
       setPasswordDialog(false);
-      setNotice({ type: "success", text: "เปลี่ยนรหัสผ่านและอัปเดตในฐานข้อมูลแล้ว" });
+      setNotice({ type: "success", text: "เปลี่ยนรหัสผ่านเรียบร้อยแล้ว" });
       form.reset();
     } catch (error) {
       setPasswordError(error.message === "Current password is incorrect"
@@ -963,42 +1002,63 @@ function App() {
         <main className="auth-main" id="login">
           <section className="auth-intro">
             <span className="intro-mark" aria-hidden="true">✓</span>
-            <p className="eyebrow">TEACHER WORKSPACE</p>
+            <p className="eyebrow">พื้นที่อาจารย์</p>
             <h1>จัดการรายวิชา<br />และติดตามงาน</h1>
-            <p>เข้าสู่ระบบเพื่อดูแลรายวิชา จัดการงาน และตรวจสถานะ submission ที่ Backend บันทึกไว้</p>
+            <p>จัดการรายวิชา งานที่มอบหมาย และติดตามการส่งงานของนิสิต</p>
             <div className="auth-points">
               <span><i>01</i> รายวิชาและงานของคุณ</span>
-              <span><i>02</i> สถานะจากข้อมูลจริง</span>
+              <span><i>02</i> ติดตามสถานะการส่งงาน</span>
               <span><i>03</i> ทำเครื่องหมายตรวจแล้ว</span>
             </div>
           </section>
           <section className="login-card" aria-labelledby="login-title">
             <div className="login-card-heading">
               <span className="login-icon" aria-hidden="true">↗</span>
-              <p className="eyebrow">ยินดีต้อนรับ</p>
-              <h2 id="login-title">เข้าสู่ระบบอาจารย์</h2>
-              <p>ใช้บัญชีอาจารย์ที่ตั้งค่าไว้ใน Backend</p>
+              <p className="eyebrow">บัญชีอาจารย์</p>
+              <h2 id="login-title">{teacherAuthMode === "login" ? "เข้าสู่ระบบอาจารย์" : "สมัครบัญชีอาจารย์"}</h2>
+              <p>{teacherAuthMode === "login" ? "ใช้บัญชีอาจารย์เพื่อจัดการรายวิชาและติดตามงาน" : "กรอกข้อมูลเพื่อสร้างบัญชีอาจารย์"}</p>
             </div>
             <SystemHealth />
             {authMessage && <Message type="warning">{authMessage}</Message>}
             {systemError && <Message type="error" title="เชื่อมต่อระบบไม่ได้">{systemError}</Message>}
-            {authError && <Message type="error" title="เข้าสู่ระบบไม่สำเร็จ">{authError}</Message>}
-            <form className="form-stack login-form" onSubmit={submitLogin}>
+            {authError && <Message type="error" title={teacherAuthMode === "login" ? "เข้าสู่ระบบไม่สำเร็จ" : "สมัครบัญชีไม่สำเร็จ"}>{authError}</Message>}
+            <form className="form-stack login-form" onSubmit={submitTeacherAuth}>
+              {teacherAuthMode === "register" && (
+                <label className="field">
+                  <span>ชื่อ-นามสกุล</span>
+                  <input name="full_name" autoComplete="name" maxLength="150" placeholder="กรอกชื่อและนามสกุล" required />
+                </label>
+              )}
               <label className="field">
                 <span>อีเมล</span>
-                <input name="email" type="email" autoComplete="username" placeholder="teacher@example.com" required />
+                <input name="email" type="email" autoComplete="username" maxLength="255" placeholder="teacher@example.ac.th" required />
+                {teacherAuthMode === "register" && <small>ใช้อีเมลที่มีส่วนลงท้าย เช่น .com หรือ .ac.th</small>}
               </label>
+              {teacherAuthMode === "register" && (
+                <label className="field">
+                  <span>รหัสเชิญจากผู้ดูแลระบบ</span>
+                  <input name="invite_code" autoComplete="off" maxLength="255" placeholder="กรอกรหัสที่ได้รับจากผู้ดูแลระบบ" />
+                  <small>ขอรหัสจากผู้ดูแลระบบโดยตรง รหัสใช้ได้ครั้งเดียวและหมดอายุภายใน 24 ชั่วโมง</small>
+                </label>
+              )}
               <label className="field">
                 <span>รหัสผ่าน</span>
-                <input name="password" type="password" autoComplete="current-password" placeholder="กรอกรหัสผ่าน" required />
+                <input name="password" type="password" autoComplete={teacherAuthMode === "login" ? "current-password" : "new-password"} minLength={teacherAuthMode === "register" ? "8" : undefined} maxLength="72" placeholder={teacherAuthMode === "register" ? "อย่างน้อย 8 ตัวอักษร" : "กรอกรหัสผ่าน"} required />
               </label>
+              {teacherAuthMode === "register" && (
+                <label className="field">
+                  <span>ยืนยันรหัสผ่าน</span>
+                  <input name="password_confirm" type="password" autoComplete="new-password" minLength="8" maxLength="72" placeholder="กรอกรหัสผ่านอีกครั้ง" required />
+                </label>
+              )}
               <button className="button button-primary button-wide" type="submit" disabled={loginLoading}>
-                {loginLoading ? "กำลังเข้าสู่ระบบ…" : "เข้าสู่ระบบ"}
+                {loginLoading ? "กำลังเชื่อมต่อ…" : teacherAuthMode === "login" ? "เข้าสู่ระบบ" : "สมัครและเข้าสู่ระบบ"}
                 {!loginLoading && <span aria-hidden="true">→</span>}
               </button>
             </form>
-            <p className="login-footnote">ระบบจะเก็บเฉพาะ token สำหรับใช้งาน API บนเบราว์เซอร์นี้</p>
-            <p className="login-footnote">ไม่มีสมัครบัญชีจากหน้านี้ ต้องใช้บัญชีอาจารย์ที่สร้างไว้ใน Backend แล้ว</p>
+            <button className="button button-secondary button-wide" type="button" onClick={() => { setTeacherAuthMode(teacherAuthMode === "login" ? "register" : "login"); setAuthError(""); setAuthMessage(""); }}>
+              {teacherAuthMode === "login" ? "สมัครบัญชีอาจารย์" : "กลับไปเข้าสู่ระบบ"}
+            </button>
           </section>
         </main>
         <footer className="footer"><span>ระบบติดตามสถานะการส่งงานของนิสิต · สำหรับอาจารย์</span></footer>
@@ -1073,7 +1133,7 @@ function App() {
           </button>
           <div className="nav-note">
             <span className="nav-note-dot" />
-            <p>ข้อมูลรายการและสถานะโหลดจาก Backend</p>
+            <p>จัดการรายวิชา งาน และสถานะการส่งงาน</p>
           </div>
         </aside>
 
@@ -1093,7 +1153,7 @@ function App() {
             <>
               <div className="page-heading">
                 <div>
-                  <p className="eyebrow">COURSE MANAGEMENT</p>
+                  <p className="eyebrow">จัดการรายวิชา</p>
                   <h1>รายวิชาของฉัน</h1>
                   <p className="page-subtitle">จัดการรายวิชาที่บัญชีอาจารย์นี้เป็นเจ้าของ</p>
                 </div>
@@ -1117,7 +1177,7 @@ function App() {
                 <EmptyState icon="▤" title="ยังไม่มีรายวิชาของคุณ" action={
                   <button className="button button-primary" type="button" onClick={() => openCourseForm()}>เพิ่มรายวิชาแรก</button>
                 }>
-                  รายการจะแสดงเมื่อ Backend ตอบกลับข้อมูลรายวิชาของบัญชีนี้
+                  รายวิชาที่คุณเพิ่มจะแสดงที่นี่
                 </EmptyState>
               ) : (
                 <div className="course-grid">
@@ -1148,7 +1208,7 @@ function App() {
             <>
               <div className="page-heading">
                 <div>
-                  <p className="eyebrow">COURSE ENROLLMENT</p>
+                  <p className="eyebrow">คำขอลงทะเบียน</p>
                   <h1>คำขอลงทะเบียน</h1>
                   <p className="page-subtitle">ตรวจสอบรายชื่อนิสิตและอนุมัติก่อนให้นิสิตเห็นงานในรายวิชา</p>
                 </div>
@@ -1217,9 +1277,9 @@ function App() {
             <>
               <div className="page-heading">
                 <div>
-                  <p className="eyebrow">ASSIGNMENT MANAGEMENT</p>
+                  <p className="eyebrow">จัดการงาน</p>
                   <h1>งานของฉัน</h1>
-                  <p className="page-subtitle">จัดการงานทุกสถานะ และเปิดดูสถานะ submission ที่มีอยู่</p>
+                  <p className="page-subtitle">จัดการงานและติดตามสถานะการส่งงานของนิสิต</p>
                 </div>
                 <div className="heading-actions">
                   <button className="button button-quiet" type="button" disabled={assignmentsLoading} onClick={() => setRefreshVersion((value) => value + 1)}>
@@ -1241,7 +1301,7 @@ function App() {
                 <EmptyState icon="▧" title="ยังไม่มีงานของคุณ" action={
                   <button className="button button-primary" type="button" onClick={() => openAssignmentForm()}>เพิ่มงานแรก</button>
                 }>
-                  รายการจะแสดงเมื่อ Backend ตอบกลับข้อมูลงานที่คุณจัดการ
+                  งานที่คุณเพิ่มจะแสดงที่นี่
                 </EmptyState>
               ) : (
                 <div className="assignment-list">
@@ -1257,7 +1317,7 @@ function App() {
                         <p className="card-description">{assignment.description || "ไม่มีรายละเอียดเพิ่มเติม"}</p>
                         <div className="assignment-due"><span aria-hidden="true">◷</span> คะแนนเต็ม {assignment.max_score ?? 100} · กำหนดส่ง {formatDate(assignment.due_at)}</div>
                         <div className="card-actions assignment-actions">
-                          <button className="button button-secondary" type="button" onClick={() => openSubmissions(assignment)}>ดูสถานะ submission</button>
+                          <button className="button button-secondary" type="button" onClick={() => openSubmissions(assignment)}>ดูสถานะการส่งงาน</button>
                           <button className="button button-quiet" type="button" onClick={() => openAssignmentForm(assignment)}>แก้ไข</button>
                           <button className="button button-danger-quiet" type="button" disabled={busyAction === "assignment-" + assignment.id} onClick={() => deleteAssignment(assignment)}>
                             {busyAction === "assignment-" + assignment.id ? "กำลังลบ…" : "ลบ"}
@@ -1279,31 +1339,31 @@ function App() {
               </button>
               <div className="page-heading detail-heading">
                 <div>
-                  <p className="eyebrow">SUBMISSION STATUS</p>
+                  <p className="eyebrow">สถานะการส่งงาน</p>
                   <h1>{selectedAssignment.title}</h1>
                   <p className="page-subtitle">{selectedAssignment.course_code} · {selectedAssignment.course_name} · คะแนนเต็ม {selectedAssignment.max_score ?? 100} · กำหนดส่ง {formatDate(selectedAssignment.due_at)}</p>
                 </div>
                 <StatusPill status={selectedAssignment.status} />
               </div>
               <div className="summary-strip">
-                <div><strong>{submissionsLoading ? "…" : submissions.length}</strong><span>รายชื่อนิสิตในผลลัพธ์</span></div>
-                <div><strong>{submissionsLoading ? "…" : hasSubmissionCount}</strong><span>มี submission</span></div>
+                <div><strong>{submissionsLoading ? "…" : submissions.length}</strong><span>นิสิตทั้งหมด</span></div>
+                <div><strong>{submissionsLoading ? "…" : hasSubmissionCount}</strong><span>ส่งงานแล้ว</span></div>
                 <div><strong>{submissionsLoading ? "…" : reviewedCount}</strong><span>ตรวจแล้ว</span></div>
               </div>
               <div className="section-caption">
-                <div><h2>สถานะจาก Backend</h2><p>แสดงเฉพาะรายชื่อและสถานะที่ API ส่งกลับมา</p></div>
+                <div><h2>รายชื่อและสถานะการส่งงาน</h2><p>ตรวจสอบไฟล์ คะแนน และความคิดเห็นของนิสิต</p></div>
                 <button className="button button-quiet" type="button" onClick={() => setSubmissionRefresh((value) => value + 1)}>รีเฟรช</button>
               </div>
               {submissionsError && (
-                <Message type="error" title="โหลดหรือปรับสถานะ submission ไม่สำเร็จ" action={
+                <Message type="error" title="โหลดหรือบันทึกผลตรวจไม่สำเร็จ" action={
                   <button className="button button-quiet" type="button" onClick={() => setSubmissionRefresh((value) => value + 1)}>ลองอีกครั้ง</button>
                 }>{submissionsError}</Message>
               )}
               {submissionsLoading ? (
-                <div className="loading-state"><span className="spinner" />กำลังโหลดสถานะ submission…</div>
+                <div className="loading-state"><span className="spinner" />กำลังโหลดสถานะการส่งงาน…</div>
               ) : submissions.length === 0 && !submissionsError ? (
-                <EmptyState icon="◌" title="ไม่มีรายชื่อในผลลัพธ์">
-                  Backend ยังไม่มีรายชื่อนิสิตที่ลงทะเบียนในรายวิชานี้
+                <EmptyState icon="◌" title="ยังไม่มีนิสิตในรายวิชานี้">
+                  รายชื่อนิสิตที่ลงทะเบียนจะแสดงที่นี่
                 </EmptyState>
               ) : (
                 <div className="submission-table-wrap">
@@ -1337,9 +1397,9 @@ function App() {
                           ) : "—"}</td>
                           <td>
                             {item.status ? <form className="submission-grade-form" onSubmit={(event) => saveGrade(item, event)}>
-                              <textarea aria-label={`ความคิดเห็นของ ${item.full_name || item.student_code}`} maxLength="500" rows="2" placeholder="เขียน feedback ให้นิสิต (ไม่เกิน 500 ตัวอักษร)" value={submissionDrafts[String(item.student_id)]?.remarks ?? ""} onChange={(event) => updateSubmissionDraft(item.student_id, "remarks", event.target.value)} disabled={busyAction === "grade-" + item.student_id} />
+                              <textarea aria-label={`ความคิดเห็นของ ${item.full_name || item.student_code}`} maxLength="500" rows="2" placeholder="เขียนความคิดเห็นถึงนิสิต" value={submissionDrafts[String(item.student_id)]?.remarks ?? ""} onChange={(event) => updateSubmissionDraft(item.student_id, "remarks", event.target.value)} disabled={busyAction === "grade-" + item.student_id} />
                               <button className="button button-primary button-small" type="submit" disabled={busyAction === "grade-" + item.student_id}>
-                                {busyAction === "grade-" + item.student_id ? "กำลังบันทึก…" : item.status === "REVIEWED" ? "อัปเดตคะแนน / feedback" : "บันทึกคะแนนและตรวจแล้ว"}
+                                {busyAction === "grade-" + item.student_id ? "กำลังบันทึก…" : item.status === "REVIEWED" ? "อัปเดตคะแนนและความคิดเห็น" : "บันทึกคะแนนและตรวจแล้ว"}
                               </button>
                             </form> : <span className="muted-text">ยังไม่มีรายการให้ตรวจ</span>}
                           </td>
@@ -1349,19 +1409,19 @@ function App() {
                   </table>
                 </div>
               )}
-              <p className="data-note">ข้อมูลไฟล์ คะแนน และ feedback มาจาก Backend โดยตรง; เปิดตัวอย่างได้เฉพาะ PDF และรูปภาพที่รองรับ ส่วนไฟล์อื่นดาวน์โหลดได้ เฉพาะอาจารย์เจ้าของงานเท่านั้น</p>
+              <p className="data-note">อาจารย์เจ้าของงานสามารถเปิดดูตัวอย่างไฟล์ PDF และรูปภาพ หรือดาวน์โหลดไฟล์ประเภทอื่นได้</p>
             </>
           )}
         </section>
       </main>
 
-      <footer className="footer"><span>ระบบติดตามสถานะการส่งงานของนิสิต · ข้อมูลตาม API ของ Backend</span></footer>
+      <footer className="footer"><span>ระบบติดตามสถานะการส่งงานของนิสิต · พื้นที่อาจารย์</span></footer>
 
       {courseDialog && (
         <div className="modal-backdrop" role="presentation">
           <section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="course-dialog-title">
             <div className="modal-heading">
-              <div><p className="eyebrow">COURSE DETAILS</p><h2 id="course-dialog-title">{courseEditing ? "แก้ไขรายวิชา" : "เพิ่มรายวิชา"}</h2></div>
+              <div><p className="eyebrow">รายละเอียดรายวิชา</p><h2 id="course-dialog-title">{courseEditing ? "แก้ไขรายวิชา" : "เพิ่มรายวิชา"}</h2></div>
               <button className="modal-close" type="button" aria-label="ปิด" onClick={() => setCourseDialog(false)}>×</button>
             </div>
             {courseFormError && <Message type="error">{courseFormError}</Message>}
@@ -1391,7 +1451,7 @@ function App() {
         <div className="modal-backdrop" role="presentation">
           <section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="assignment-dialog-title">
             <div className="modal-heading">
-              <div><p className="eyebrow">ASSIGNMENT DETAILS</p><h2 id="assignment-dialog-title">{assignmentEditing ? "แก้ไขงาน" : "เพิ่มงาน"}</h2></div>
+              <div><p className="eyebrow">รายละเอียดงาน</p><h2 id="assignment-dialog-title">{assignmentEditing ? "แก้ไขงาน" : "เพิ่มงาน"}</h2></div>
               <button className="modal-close" type="button" aria-label="ปิด" onClick={() => setAssignmentDialog(false)}>×</button>
             </div>
             {assignmentFormError && <Message type="error">{assignmentFormError}</Message>}
@@ -1465,7 +1525,7 @@ function App() {
         <div className="modal-backdrop" role="presentation">
           <section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="teacher-password-title">
             <div className="modal-heading">
-              <div><p className="eyebrow">ACCOUNT SECURITY</p><h2 id="teacher-password-title">เปลี่ยนรหัสผ่านอาจารย์</h2></div>
+              <div><p className="eyebrow">ความปลอดภัยบัญชี</p><h2 id="teacher-password-title">เปลี่ยนรหัสผ่านอาจารย์</h2></div>
               <button className="modal-close" type="button" aria-label="ปิด" onClick={() => setPasswordDialog(false)}>×</button>
             </div>
             {passwordError && <Message type="error" title="เปลี่ยนรหัสผ่านไม่สำเร็จ">{passwordError}</Message>}
